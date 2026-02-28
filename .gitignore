@@ -20,8 +20,8 @@ __pycache__/
 # Local outputs
 *.json
 *.csv
-!Supabase-Pipeline/package.json
-!Supabase-Pipeline/package-lock.json
+!data_pipeline/package.json
+!data_pipeline/package-lock.json
 !backend/package.json
 !backend/package-lock.json
 
