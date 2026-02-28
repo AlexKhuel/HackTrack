@@ -45,12 +45,18 @@ function showClassConstraint(value) {
   return text || "none"
 }
 
-function showMaxTravelTimeHours(value) {
+function showBudgetConstraint(value) {
+  const budget = Number(value)
+  if (!Number.isFinite(budget) || budget < 0) return "No budget cap"
+  return `Max $${Math.round(budget)}`
+}
+
+function showMaxTravelTimeConstraint(value) {
   const minutes = Number(value)
-  if (!Number.isFinite(minutes) || minutes < 0) return "16.7h"
+  if (!Number.isFinite(minutes) || minutes < 0) return "No one-way time cap"
   const hours = minutes / 60
   const rounded = Math.round(hours * 10) / 10
-  return `${rounded}h`
+  return `Max ${rounded}h one-way`
 }
 
 const MOCK_HACKATHONS = [
@@ -223,7 +229,8 @@ export default function ResultsList({ formData }) {
             {formData?.primary_airport_code ? formData.primary_airport_code : "—"} •{" "}
             {formData?.timezone || "Timezone unknown"} •{" "}
             {formData?.country || "Country unknown"} •{" "}
-            Max ${formData?.max_cost ?? "1000"} / {showMaxTravelTimeHours(formData?.max_time)} •{" "}
+            {showBudgetConstraint(formData?.max_cost)} •{" "}
+            {showMaxTravelTimeConstraint(formData?.max_time)} •{" "}
             Fri {showClassConstraint(formData?.friday_last_class)} • Mon {showClassConstraint(formData?.monday_first_class)} •{" "}
             {friends.length ? `Friends: ${friends.join(", ")}` : "No friend cities"}
           </div>
