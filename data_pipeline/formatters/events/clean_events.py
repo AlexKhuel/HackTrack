@@ -602,6 +602,8 @@ def merge_by_name_start(records: list[dict[str, Any]]) -> list[dict[str, Any]]:
 def strip_internal_fields(records: list[dict[str, Any]]) -> list[dict[str, Any]]:
     cleaned: list[dict[str, Any]] = []
     for record in records:
+        if record.get("in_person") is False:
+            continue
         cleaned.append({field: record.get(field) for field in DEFAULT_OUTPUT_FIELDS})
     return cleaned
 
