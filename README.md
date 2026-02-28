@@ -100,6 +100,7 @@ Returns feasible hackathons for a given user context.
 | `user_timezone` | ✓ | IANA string, e.g. `America/New_York` |
 | `budget` | ✓ | Total all-in budget (USD) |
 | `include_lodging` | — | Default `true` |
+| `friend_cities` | — | Optional list of cities where lodging is free (supports repeated params, comma-separated text, or JSON array) |
 | `date_range_start` | — | `YYYY-MM-DD` |
 | `date_range_end` | — | `YYYY-MM-DD` |
 
@@ -117,7 +118,7 @@ Returns `{ "status": "ok" }`.
 
 **Time** — for each event, the app works backwards from the event start and end times to find the latest possible Friday departure and earliest possible Monday return. Both must fit within the user's class schedule. All timezone math is done in UTC via Luxon; DST-safe.
 
-**Budget** — maps the event city to an airport, looks up route average outbound + return prices, and uses `lodging.nightly_rate` when available (falling back to a flat `$90/night` estimate when missing). The total must be within the user's budget.
+**Budget** — maps the event city to an airport, looks up route average outbound + return prices, and uses `lodging.nightly_rate` when available (falling back to a flat `$90/night` estimate when missing). If `friend_cities` contains the destination city, lodging is treated as `$0`. The total must be within the user's budget.
 
 ---
 

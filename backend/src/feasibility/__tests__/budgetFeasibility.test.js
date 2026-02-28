@@ -179,7 +179,25 @@ describe('checkBudgetFeasibility', () => {
     expect(result.estimated_total_cost).toBe(350);
   });
 
-  // CASE 8: lodging table nightly_rate overrides heuristic
+  // CASE 8: friend in destination city waives lodging even when include_lodging is true
+  test('has_friend_in_city: true → lodging cost is zero', () => {
+    const result = checkBudgetFeasibility(
+      makeEvent('San Francisco'),
+      {
+        budget: 300,
+        include_lodging: true,
+        lodging_nightly_rate: 140,
+        has_friend_in_city: true,
+      },
+      makeRoute({ outbound: 150, return: 120 }) // flight $270
+    );
+    expect(result.feasible).toBe(true);
+    expect(result.estimated_flight_cost).toBe(270);
+    expect(result.estimated_lodging_cost).toBe(0);
+    expect(result.estimated_total_cost).toBe(270);
+  });
+
+  // CASE 9: lodging table nightly_rate overrides heuristic
   test('lodging_nightly_rate uses DB value when provided', () => {
     const result = checkBudgetFeasibility(
       makeEvent('San Francisco'),
@@ -191,7 +209,7 @@ describe('checkBudgetFeasibility', () => {
     expect(result.estimated_total_cost).toBe(350);
   });
 
-  // CASE 9: fallback lodging is uniform when DB rate is missing
+  // CASE 10: fallback lodging is uniform when DB rate is missing
   test('same flight price across cities uses same fallback lodging', () => {
     const route = makeRoute({ outbound: 150, return: 150 }); // $300 flight
 
@@ -213,7 +231,7 @@ describe('checkBudgetFeasibility', () => {
     expect(sfResult.estimated_total_cost).toBe(columbusResult.estimated_total_cost);
   });
 
-  // CASE 10: Null city field → handled gracefully
+  // CASE 11: Null city field → handled gracefully
   test('null city field → infeasible, no crash', () => {
     const result = checkBudgetFeasibility(
       makeEvent(null),

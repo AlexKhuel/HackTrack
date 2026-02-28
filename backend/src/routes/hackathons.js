@@ -83,6 +83,80 @@ function resolveLodgingNightlyRate(eventCity, routeDestinationCity, destAirport,
   return null;
 }
 
+function buildFriendCityTokenSet(rawFriendCities) {
+  const friendCityTokens = new Set();
+  const addToken = (raw) => {
+    const token = normalizeCityToken(raw);
+    if (token) friendCityTokens.add(token);
+  };
+
+  const addTokensFromText = (value) => {
+    const text = String(value ?? '').trim();
+    if (!text) return;
+
+    addToken(text);
+
+    if (text.startsWith('[') && text.endsWith(']')) {
+      try {
+        const parsed = JSON.parse(text);
+        if (Array.isArray(parsed)) {
+          for (const entry of parsed) addToken(entry);
+          return;
+        }
+      } catch {
+        // Fall back to delimiter parsing for non-JSON strings.
+      }
+    }
+
+    for (const delimiter of ['|', ';', '\n']) {
+      if (!text.includes(delimiter)) continue;
+      for (const segment of text.split(delimiter)) addToken(segment);
+    }
+
+    if (text.includes(',')) {
+      for (const segment of text.split(',')) addToken(segment);
+    }
+  };
+
+  if (Array.isArray(rawFriendCities)) {
+    for (const value of rawFriendCities) addTokensFromText(value);
+  } else if (rawFriendCities != null) {
+    addTokensFromText(rawFriendCities);
+  }
+
+  return friendCityTokens;
+}
+
+function hasFriendInDestinationCity(eventCity, routeDestinationCity, destAirport, friendCityTokens) {
+  if (!(friendCityTokens instanceof Set) || friendCityTokens.size === 0) return false;
+
+  const candidates = [];
+  const addCandidate = (raw) => {
+    const token = normalizeCityToken(raw);
+    if (!token || candidates.includes(token)) return;
+    candidates.push(token);
+  };
+
+  addCandidate(eventCity);
+  addCandidate(routeDestinationCity);
+
+  if (typeof eventCity === 'string') {
+    for (const segment of eventCity.split(/,|\/|\||@|(?:\s[-–—]\s)/)) {
+      addCandidate(segment);
+    }
+  }
+
+  if (typeof routeDestinationCity === 'string') {
+    for (const segment of routeDestinationCity.split(/,|\/|\||@|(?:\s[-–—]\s)/)) {
+      addCandidate(segment);
+    }
+  }
+
+  addCandidate(resolveAirportCity(destAirport));
+
+  return candidates.some((cityToken) => friendCityTokens.has(cityToken));
+}
+
 /**
  * GET /api/hackathons/feasible
  *
@@ -95,6 +169,7 @@ function resolveLodgingNightlyRate(eventCity, routeDestinationCity, destAirport,
  *
  * Optional query params:
  *   include_lodging            - "true"|"false" (default: "true")
+ *   friend_cities              - optional city list for free lodging if friend lives there
  *   date_range_start           - ISO date "YYYY-MM-DD"
  *   date_range_end             - ISO date "YYYY-MM-DD"
  */
@@ -106,6 +181,7 @@ router.get('/feasible', async (req, res) => {
     user_timezone,
     budget,
     include_lodging = 'true',
+    friend_cities,
     date_range_start,
     date_range_end,
   } = req.query;
@@ -123,6 +199,8 @@ router.get('/feasible', async (req, res) => {
 
   const budgetNum      = parseFloat(budget);
   const lodgingEnabled = include_lodging !== 'false';
+  const friendCitiesRaw = friend_cities ?? req.query['friend_cities[]'];
+  const friendCityTokens = buildFriendCityTokenSet(friendCitiesRaw);
 
   if (isNaN(budgetNum) || budgetNum <= 0) {
     return res.status(400).json({ error: 'budget must be a positive number' });
@@ -196,6 +274,12 @@ router.get('/feasible', async (req, res) => {
         destAirport,
         nightlyRateByCity
       );
+      const hasFriendInCity = hasFriendInDestinationCity(
+        event.city,
+        route ? route.destination_city : null,
+        destAirport,
+        friendCityTokens
+      );
 
       // Budget check (uses DB lodging if available; falls back to heuristic).
       const budgetResult = checkBudgetFeasibility(
@@ -204,6 +288,7 @@ router.get('/feasible', async (req, res) => {
           budget: budgetNum,
           include_lodging: lodgingEnabled,
           lodging_nightly_rate: lodgingNightlyRate,
+          has_friend_in_city: hasFriendInCity,
         },
         route
       );

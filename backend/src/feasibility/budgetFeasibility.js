@@ -239,6 +239,7 @@ function resolveAirportTimezone(airportCode) {
  * @param {Object} userParams
  * @param {number} userParams.budget            Total all-in budget in USD
  * @param {boolean} [userParams.include_lodging=true]  Whether to add lodging estimate
+ * @param {boolean} [userParams.has_friend_in_city=false]  Whether lodging is free via friend stay
  *
  * @param {Object|null} route   Row from routes table (or null if unavailable)
  * @param {number} route.avg_outbound_price
@@ -254,7 +255,12 @@ function resolveAirportTimezone(airportCode) {
  * }}
  */
 function checkBudgetFeasibility(event, userParams, route) {
-  const { budget, include_lodging = true, lodging_nightly_rate = null } = userParams;
+  const {
+    budget,
+    include_lodging = true,
+    lodging_nightly_rate = null,
+    has_friend_in_city = false,
+  } = userParams;
 
   const destAirport = resolveAirport(event.city);
 
@@ -295,7 +301,8 @@ function checkBudgetFeasibility(event, userParams, route) {
 
   const flightCost  = Math.round((outboundPrice + returnPrice) * 100) / 100;
   const nightlyRate = lodging_nightly_rate == null ? null : Number(lodging_nightly_rate);
-  const lodgingCost = include_lodging ? estimateLodging(destAirport, nightlyRate) : 0;
+  const shouldChargeLodging = include_lodging && !has_friend_in_city;
+  const lodgingCost = shouldChargeLodging ? estimateLodging(destAirport, nightlyRate) : 0;
   const totalCost   = flightCost + lodgingCost;
 
   const feasible = totalCost <= budget;
