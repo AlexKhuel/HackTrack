@@ -64,5 +64,31 @@ def get_users():
 
 #Receiving user inputs
 @app.get("/input")
-def score_events(max_cost: float, max_distance: float):
-    return scored(max_cost, max_distance)
+def score_events(user_id: int, max_cost: float, max_distance: float):
+    return scored(user_id, max_cost, max_distance)
+#Update user info in the database
+@app.post("/update")
+def update_user_db(user_id: int, max_cost: float, max_distance: float, friend_cities: list[str], primary_airport: str, secondary_airport: str, tertiary_airport: str):
+    with engine.connect() as conn:
+        conn.execute(
+            text("""
+                UPDATE users
+                SET max_cost = :max_cost,
+                    max_distance = :max_distance,
+                    friend_cities = :friend_cities,
+                    primary_airport = :primary_airport,
+                    secondary_airport = :secondary_airport,
+                    tertiary_airport = :tertiary_airport
+                WHERE id = :user_id
+            """),
+            {
+                "user_id": user_id,
+                "max_cost": max_cost,
+                "max_distance": max_distance,
+                "friend_cities": ",".join(friend_cities),
+                "primary_airport": primary_airport,
+                "secondary_airport": secondary_airport,
+                "tertiary_airport": tertiary_airport
+            }
+        )
+    return {"status": "updated"}
