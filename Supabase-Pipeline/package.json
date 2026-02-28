@@ -1,0 +1,13 @@
+{
+  "name": "irvine-hacks-supabase-pipeline",
+  "private": true,
+  "version": "1.0.0",
+  "description": "JS DB loader for Irvine-Hacks data pipeline",
+  "scripts": {
+    "load": "node load_to_supabase.js"
+  },
+  "dependencies": {
+    "dotenv": "^16.4.5",
+    "pg": "^8.13.1"
+  }
+}
