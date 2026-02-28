@@ -9,6 +9,8 @@ const { spawn } = require('node:child_process');
 
 const SCRIPT_DIR = __dirname;
 const REPO_ROOT = path.resolve(SCRIPT_DIR, '..');
+const DEFAULT_BUNDLED_ROUTES_INPUT = path.join(SCRIPT_DIR, 'data', 'routes_weighted_post2020.json');
+const DEFAULT_BUNDLED_LODGING_INPUT = path.join(SCRIPT_DIR, 'data', 'lodging_formatted.json');
 
 function timestamp() {
     return new Date().toISOString();
@@ -156,12 +158,14 @@ function parseArgs(argv) {
         devpostStatuses: 'open,upcoming',
         mlhMaxEvents: null,
         devpostMaxHackathons: null,
+        includeAll: false,
         includeFlights: false,
         flightsInput: null,
+        routesInput: null,
         routesTable: 'routes',
         includeHotels: false,
-        hotelsBookingInput: null,
-        hotelsTripadvisorInput: null,
+        hotelsInput: null,
+        lodgingInput: null,
         lodgingTable: 'lodging',
         table: 'events',
         dbUrl: null,
@@ -187,12 +191,14 @@ function parseArgs(argv) {
         else if (token === '--devpost-statuses') args.devpostStatuses = argv[++i];
         else if (token === '--mlh-max-events') args.mlhMaxEvents = parseOptionalInt(argv[++i], null);
         else if (token === '--devpost-max-hackathons') args.devpostMaxHackathons = parseOptionalInt(argv[++i], null);
+        else if (token === '--include-all') args.includeAll = true;
         else if (token === '--include-flights') args.includeFlights = true;
         else if (token === '--flights-input') args.flightsInput = argv[++i];
+        else if (token === '--routes-input') args.routesInput = argv[++i];
         else if (token === '--routes-table') args.routesTable = argv[++i];
         else if (token === '--include-hotels') args.includeHotels = true;
-        else if (token === '--hotels-booking-input') args.hotelsBookingInput = argv[++i];
-        else if (token === '--hotels-tripadvisor-input') args.hotelsTripadvisorInput = argv[++i];
+        else if (token === '--hotels-input') args.hotelsInput = argv[++i];
+        else if (token === '--lodging-input') args.lodgingInput = argv[++i];
         else if (token === '--lodging-table') args.lodgingTable = argv[++i];
         else if (token === '--table') args.table = argv[++i];
         else if (token === '--db-url') args.dbUrl = argv[++i];
@@ -206,6 +212,7 @@ function parseArgs(argv) {
             log('Run MLH + Devpost + Devfolio scrapers, clean merged data, and load into Supabase Postgres via JS.');
             log('');
             log('Options:');
+            log('  --include-all                  Run events + flights + hotels (uses bundled routes/lodging data if no raw inputs)');
             log('  --hang-warning-seconds <n>     Warn if subprocess emits no output for n seconds (default: 60)');
             log('  --command-timeout-seconds <n>  Kill subprocess after n seconds (default: 0 = disabled)');
             process.exit(0);
@@ -223,6 +230,17 @@ async function main(argv) {
     const args = parseArgs(argv);
 
     loadEnvFile(path.join(REPO_ROOT, '.env'));
+
+    if (args.includeAll) {
+        args.includeFlights = true;
+        args.includeHotels = true;
+        if (!args.routesInput && !args.flightsInput) {
+            args.routesInput = DEFAULT_BUNDLED_ROUTES_INPUT;
+        }
+        if (!args.lodgingInput && !args.hotelsInput) {
+            args.lodgingInput = DEFAULT_BUNDLED_LODGING_INPUT;
+        }
+    }
 
     if (args.table === 'events' && process.env.EVENTS_TABLE) {
         args.table = process.env.EVENTS_TABLE;
@@ -249,6 +267,9 @@ async function main(argv) {
     log('Starting data pipeline run.');
     log(`Output directory: ${outputDir}`);
     log(`Hang warning threshold: ${args.hangWarningSeconds}s`);
+    if (args.includeAll) {
+        log('Include-all mode enabled (events + flights + hotels).');
+    }
     if (args.commandTimeoutSeconds > 0) {
         log(`Command timeout: ${args.commandTimeoutSeconds}s`);
     }
@@ -363,24 +384,42 @@ async function main(argv) {
     }
 
     if (args.includeFlights) {
-        if (!args.flightsInput) {
-            log('Missing --flights-input required for flights pipeline.');
-            process.exit(2);
-        }
-        const flightsInput = path.resolve(args.flightsInput);
-        const routesOutput = path.join(outputDir, 'routes_formatted.json');
+        let routesInputPath = null;
 
-        log(`Formatting routes from flights input: ${flightsInput}`);
-        const formatRoutesArgs = [
-            path.join(SCRIPT_DIR, 'formatters', 'flights', 'format_routes_from_flights.py'),
-            '--input', flightsInput,
-            '--output', routesOutput,
-        ];
-        await runCommand('python3', formatRoutesArgs, REPO_ROOT, commandOptions);
+        if (args.routesInput) {
+            routesInputPath = path.resolve(args.routesInput);
+            if (!fs.existsSync(routesInputPath)) {
+                log(`Routes input file not found: ${routesInputPath}`);
+                process.exit(2);
+            }
+            log(`Using preformatted routes input: ${routesInputPath}`);
+        } else {
+            if (!args.flightsInput) {
+                log('Missing flights data. Provide --routes-input <routes.json> or --flights-input <flights.csv>.');
+                process.exit(2);
+            }
+
+            const flightsInput = path.resolve(args.flightsInput);
+            if (!fs.existsSync(flightsInput)) {
+                log(`Flights input file not found: ${flightsInput}`);
+                process.exit(2);
+            }
+            const routesOutput = path.join(outputDir, 'routes_formatted.json');
+
+            log(`Formatting routes from flights input: ${flightsInput}`);
+            const formatRoutesArgs = [
+                path.join(SCRIPT_DIR, 'formatters', 'flights', 'format_routes_from_flights.py'),
+                '--input', flightsInput,
+                '--output', routesOutput,
+            ];
+            await runCommand('python3', formatRoutesArgs, REPO_ROOT, commandOptions);
+            routesInputPath = routesOutput;
+            log(`Routes output: ${routesOutput}`);
+        }
 
         const loadRoutesArgs = [
             path.join(SCRIPT_DIR, 'loaders', 'load_routes.js'),
-            '--input', routesOutput,
+            '--input', routesInputPath,
             '--table', args.routesTable,
             '--batch-size', String(args.batchSize),
         ];
@@ -389,31 +428,46 @@ async function main(argv) {
         if (args.dryRun) loadRoutesArgs.push('--dry-run');
 
         await runCommand('node', loadRoutesArgs, REPO_ROOT, commandOptions);
-        log(`Routes output: ${routesOutput}`);
+        log(`Routes loaded from: ${routesInputPath}`);
     }
 
     if (args.includeHotels) {
-        if (!args.hotelsBookingInput || !args.hotelsTripadvisorInput) {
-            log('Missing --hotels-booking-input or --hotels-tripadvisor-input required for hotels pipeline.');
-            process.exit(2);
+        let lodgingInputPath = null;
+
+        if (args.lodgingInput) {
+            lodgingInputPath = path.resolve(args.lodgingInput);
+            if (!fs.existsSync(lodgingInputPath)) {
+                log(`Lodging input file not found: ${lodgingInputPath}`);
+                process.exit(2);
+            }
+            log(`Using preformatted lodging input: ${lodgingInputPath}`);
+        } else {
+            if (!args.hotelsInput) {
+                log('Missing lodging data. Provide --lodging-input <lodging.json> or --hotels-input <hotels.csv>.');
+                process.exit(2);
+            }
+
+            const hotelsInput = path.resolve(args.hotelsInput);
+            if (!fs.existsSync(hotelsInput)) {
+                log(`Hotels input file not found: ${hotelsInput}`);
+                process.exit(2);
+            }
+            const lodgingOutput = path.join(outputDir, 'lodging_formatted.json');
+
+            log(`Formatting lodging from input: ${hotelsInput}`);
+            const formatLodgingArgs = [
+                path.join(SCRIPT_DIR, 'formatters', 'hotels', 'format_lodging_from_hotels.py'),
+                '--input', hotelsInput,
+                '--output', lodgingOutput,
+            ];
+            await runCommand('python3', formatLodgingArgs, REPO_ROOT, commandOptions);
+            lodgingInputPath = lodgingOutput;
+            log(`Lodging output: ${lodgingOutput}`);
         }
-
-        const bookingInput = path.resolve(args.hotelsBookingInput);
-        const tripadvisorInput = path.resolve(args.hotelsTripadvisorInput);
-        const lodgingOutput = path.join(outputDir, 'lodging_formatted.json');
-
-        log(`Formatting lodging from inputs: booking=${bookingInput}, tripadvisor=${tripadvisorInput}`);
-        const formatLodgingArgs = [
-            path.join(SCRIPT_DIR, 'formatters', 'hotels', 'format_lodging_from_hotels.py'),
-            '--booking', bookingInput,
-            '--tripadvisor', tripadvisorInput,
-            '--output', lodgingOutput,
-        ];
-        await runCommand('python3', formatLodgingArgs, REPO_ROOT, commandOptions);
 
         const loadLodgingArgs = [
             path.join(SCRIPT_DIR, 'loaders', 'load_lodging.js'),
-            '--input', lodgingOutput,
+            '--input', lodgingInputPath,
             '--table', args.lodgingTable,
             '--batch-size', String(args.batchSize),
         ];
@@ -422,7 +476,7 @@ async function main(argv) {
         if (args.dryRun) loadLodgingArgs.push('--dry-run');
 
         await runCommand('node', loadLodgingArgs, REPO_ROOT, commandOptions);
-        log(`Lodging output: ${lodgingOutput}`);
+        log(`Lodging loaded from: ${lodgingInputPath}`);
     }
 
     log('Data pipeline run completed successfully.');

@@ -23,6 +23,7 @@ __pycache__/
 !data_pipeline/package.json
 !data_pipeline/package-lock.json
 !data_pipeline/data/routes_weighted_post2020.json
+!data_pipeline/data/lodging_formatted.json
 !backend/package.json
 !backend/package-lock.json
 

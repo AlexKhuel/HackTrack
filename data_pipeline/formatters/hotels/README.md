@@ -1,6 +1,6 @@
 # Hotels Lodging Formatter
 
-Formats Booking + Tripadvisor hotel datasets into rows for:
+Formats a US city hotel average-prices CSV into rows for:
 
 - `city`
 - `nightly_rate`
@@ -19,15 +19,14 @@ create table public.lodging (
 ## Usage
 
 ```bash
-python3 Hotels-Lodging/format_lodging_from_hotels.py \
-  --booking /Users/joshuadowd/Downloads/archive/booking_hotel.csv \
-  --tripadvisor /Users/joshuadowd/Downloads/archive/tripadvisor_room.csv \
-  --output /Users/joshuadowd/Downloads/archive/lodging_formatted.csv
+python3 data_pipeline/formatters/hotels/format_lodging_from_hotels.py \
+  --input data_pipeline/data/us_city_hotel_average_prices.csv \
+  --output data_pipeline/output/lodging_formatted.json
 ```
 
 ## Notes
 
-- Output is aggregated average nightly rate per city across both datasets.
+- Input CSV columns: `city_name`, `average_price`.
 - `id` is omitted by default because Postgres auto-generates it.
 - Use `--include-id` to include deterministic ids in output files.
 - The script auto-handles common non-UTF8 CSV encodings (including `cp1252`).

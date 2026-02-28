@@ -7,8 +7,8 @@ This document is the implementation reference for the ETL pipeline under `data_p
 The pipeline ingests three categories of data:
 
 1. Events: scrape MLH, Devpost, and Devfolio hackathons; normalize and deduplicate; load into `events`.
-2. Flights: transform a raw flights CSV into route aggregates; load into `routes`.
-3. Lodging: combine Booking + Tripadvisor hotel CSVs into city nightly averages; load into `lodging`.
+2. Flights: either transform a raw flights CSV into route aggregates, or load the committed routes dataset; load into `routes`.
+3. Lodging: either format a hotel average-prices CSV, or load the committed lodging dataset; load into `lodging`.
 
 The orchestrator for all flows is `data_pipeline/run_pipeline.js`.
 
@@ -28,10 +28,14 @@ The orchestrator for all flows is `data_pipeline/run_pipeline.js`.
 - `data_pipeline/scrapers/devfolio/scrape_devfolio.py`: Devfolio scraper.
 - `data_pipeline/formatters/events/clean_events.py`: event normalization + merge + dedupe.
 - `data_pipeline/formatters/flights/format_routes_from_flights.py`: flights CSV to routes dataset.
-- `data_pipeline/formatters/hotels/format_lodging_from_hotels.py`: hotel CSVs to lodging dataset.
+- `data_pipeline/formatters/flights/format_routes_from_us_fares.py`: DOT fares CSV to recency-weighted routes dataset (post-2020).
+- `data_pipeline/formatters/hotels/format_lodging_from_hotels.py`: hotel prices CSV to lodging dataset.
 - `data_pipeline/loaders/load_to_supabase.js`: events loader.
 - `data_pipeline/loaders/load_routes.js`: routes loader.
 - `data_pipeline/loaders/load_lodging.js`: lodging loader.
+- `data_pipeline/data/routes_weighted_post2020.json`: commit-friendly trimmed routes dataset.
+- `data_pipeline/data/lodging_formatted.json`: commit-friendly US city lodging rates.
+- `data_pipeline/data/us_city_hotel_average_prices.csv`: source hotel average-price data by US city.
 
 ## Prerequisites
 
@@ -71,6 +75,18 @@ Resolution order in loaders:
 
 ## Quick start
 
+Master command (events + routes + lodging, no external CSV downloads required):
+
+```bash
+npm --prefix data_pipeline run pipeline:all
+```
+
+Master command dry run:
+
+```bash
+npm --prefix data_pipeline run pipeline:all:dry
+```
+
 Run full events pipeline (MLH + Devpost + Devfolio):
 
 ```bash
@@ -109,8 +125,31 @@ node data_pipeline/run_pipeline.js \
   --include-flights \
   --flights-input /path/to/flights.csv \
   --include-hotels \
-  --hotels-booking-input /path/to/booking_hotel.csv \
-  --hotels-tripadvisor-input /path/to/tripadvisor_room.csv
+  --hotels-input /path/to/us_city_hotel_average_prices.csv
+```
+
+Run all flows with bundled in-repo routes/lodging datasets:
+
+```bash
+node data_pipeline/run_pipeline.js --include-all
+```
+
+Load the committed weighted routes dataset only (no re-formatting step):
+
+```bash
+node data_pipeline/loaders/load_routes.js \
+  --input data_pipeline/data/routes_weighted_post2020.json \
+  --table routes \
+  --replace-existing
+```
+
+Load the committed lodging dataset only:
+
+```bash
+node data_pipeline/loaders/load_lodging.js \
+  --input data_pipeline/data/lodging_formatted.json \
+  --table lodging \
+  --replace-existing
 ```
 
 ## `run_pipeline.js` reference
@@ -119,6 +158,7 @@ node data_pipeline/run_pipeline.js \
 
 - `--output-dir <path>`: base output directory. Default `data_pipeline/output`.
 - `--cleaned-output <path>`: explicit cleaned events output path.
+- `--include-all`: run events + routes + lodging. If no raw flights/hotels inputs are provided, defaults to bundled datasets under `data_pipeline/data/`.
 - `--db-url <postgres-url>`: explicit DB URL.
 - `--batch-size <n>`: loader batch size. Default `500`.
 - `--replace-existing`: truncates target table before load.
@@ -146,14 +186,15 @@ node data_pipeline/run_pipeline.js \
 ### Flights flags
 
 - `--include-flights`: run flights formatter + loader.
-- `--flights-input <path>`: required with `--include-flights`.
+- `--routes-input <path>`: preformatted routes JSON to load directly.
+- `--flights-input <path>`: raw flights CSV (required only when `--routes-input` is not provided).
 - `--routes-table <name>`: target routes table (default `routes` or `ROUTES_TABLE`).
 
 ### Hotels flags
 
 - `--include-hotels`: run lodging formatter + loader.
-- `--hotels-booking-input <path>`: required with `--include-hotels`.
-- `--hotels-tripadvisor-input <path>`: required with `--include-hotels`.
+- `--lodging-input <path>`: preformatted lodging JSON to load directly.
+- `--hotels-input <path>`: raw hotel average-prices CSV (required only when `--lodging-input` is not provided).
 - `--lodging-table <name>`: target lodging table (default `lodging` or `LODGING_TABLE`).
 
 ## Individual script usage
@@ -207,6 +248,20 @@ node data_pipeline/loaders/load_routes.js \
   --table routes
 ```
 
+Routes from DOT fares dataset (post-2020, recency-weighted):
+
+```bash
+python3 data_pipeline/formatters/flights/format_routes_from_us_fares.py \
+  --input "/Users/joshuadowd/Downloads/US Airline Flight Routes and Fares 1993-2024.csv" \
+  --output data_pipeline/output/routes_weighted_post2020.json \
+  --min-year 2021 \
+  --half-life-quarters 8
+
+node data_pipeline/loaders/load_routes.js \
+  --input data_pipeline/output/routes_weighted_post2020.json \
+  --table routes
+```
+
 Lodging:
 
 ```bash
@@ -227,6 +282,11 @@ When running `run_pipeline.js` with defaults:
 - `data_pipeline/output/lodging_formatted.json` (if `--include-hotels`)
 
 `data_pipeline/output/` and `data_pipeline/output_test/` are generated working directories. They can be deleted safely; the orchestrator recreates output directories on the next run.
+
+Committed datasets:
+
+- `data_pipeline/data/routes_weighted_post2020.json` (trimmed post-2020 routes for repo use)
+- `data_pipeline/data/lodging_formatted.json` (repo-ready lodging rates)
 
 ## Deduplication behavior for events
 
@@ -249,7 +309,7 @@ GitHub Actions schedule is defined in `.github/workflows/data_pipeline_sync.yml`
 
 - `ModuleNotFoundError` for `requests`/`bs4`/`dateutil`: install `pip install -r data_pipeline/requirements.txt`.
 - `Missing DB URL`: set `SUPABASE_DB_URL` or pass `--db-url`.
-- `No data sources selected`: include at least one events source or pass `--include-flights`/`--include-hotels` with required input paths.
+- `No data sources selected`: include at least one events source, pass `--include-flights`/`--include-hotels` with required inputs, or use `--include-all`.
 - Unexpected empty events after cleaning: inspect raw scraper outputs and check for malformed `start_datetime` or `website` fields.
 
 ## Extending the events pipeline with a new source

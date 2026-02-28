@@ -122,6 +122,12 @@ Returns `{ "status": "ok" }`.
 
 MLH, Devpost, and Devfolio are scraped, merged, deduplicated, and loaded into Supabase on a schedule. GitHub Actions triggers a sync every Sunday and Wednesday at 00:00 UTC, or on demand via the admin endpoint.
 
-Flight route data is precomputed from a static dataset — prices are representative averages, not live airfare. Lodging rates are averaged from Booking.com and TripAdvisor datasets by city.
+Flight route and lodging datasets are committed in-repo (`data_pipeline/data/`) so new contributors do not need to download CSVs first.
+
+Master pipeline command:
+
+```bash
+npm --prefix data_pipeline run pipeline:all
+```
 
 Detailed implementation and CLI docs live in [`data_pipeline/README.md`](data_pipeline/README.md).

@@ -1,6 +1,6 @@
-# Parse Scraped Data
+# Parse Scraped Event Data
 
-Cleans and merges MLH + Devpost scraper outputs into rows ready for the Supabase `events` table.
+Cleans and merges MLH + Devpost + Devfolio scraper outputs into rows ready for the Supabase `events` table.
 
 ## Output columns
 
@@ -21,21 +21,24 @@ Cleans and merges MLH + Devpost scraper outputs into rows ready for the Supabase
 From repo root:
 
 ```bash
-python3 Parse-Scraped-Data/clean_events.py
+python3 data_pipeline/formatters/events/clean_events.py
 ```
 
 This auto-detects files matching:
 
 - `MLH-Scraper/mlh*.json|csv`
 - `Devpost-Scraper/devpost*.json|csv`
+- `Devfolio-Scraper/devfolio*.json|csv`
 
 Explicit files:
 
 ```bash
-python3 Parse-Scraped-Data/clean_events.py \
-  --mlh MLH-Scraper/mlh_2026_events.json \
-  --devpost Devpost-Scraper/devpost_hackathons.json \
-  --output Parse-Scraped-Data/cleaned_events.csv
+python3 data_pipeline/formatters/events/clean_events.py \
+  --mlh data_pipeline/output/mlh_2026_events.json \
+  --devpost data_pipeline/output/devpost_hackathons.json \
+  --devfolio data_pipeline/output/devfolio_hackathons.json \
+  --output data_pipeline/output/cleaned_events.json \
+  --format json
 ```
 
 ## What it cleans
@@ -45,4 +48,4 @@ python3 Parse-Scraped-Data/clean_events.py \
 - Splits/normalizes location into `city` + `country` when possible.
 - Converts datetimes to UTC text without timezone.
 - Parses `total_prize` text into integer `prize_pool`.
-- Merges source provenance (e.g. `devpost,mlh`) when the same event appears in both sources.
+- Merges source provenance (e.g. `devfolio,devpost,mlh`) when the same event appears in multiple sources.
