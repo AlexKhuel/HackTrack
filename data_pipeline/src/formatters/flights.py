@@ -5,6 +5,7 @@ Target schema:
   id bigint not null,
   origin_airport text,
   destination_airport text,
+  city text,
   avg_outbound_price real,
   avg_return_price real,
   avg_outbound_duration_minutes smallint,
@@ -43,10 +44,55 @@ FALLBACK_AIRPORT_TZ: dict[str, str] = {
     "SFO": "America/Los_Angeles",
 }
 
+DEFAULT_AIRPORT_TO_CITY: dict[str, str] = {
+    "ATL": "Atlanta",
+    "AUS": "Austin",
+    "BNA": "Nashville",
+    "BOS": "Boston",
+    "BWI": "Baltimore",
+    "CLE": "Cleveland",
+    "CLT": "Charlotte",
+    "CMH": "Columbus",
+    "CMI": "Champaign",
+    "DCA": "Washington",
+    "DEN": "Denver",
+    "DFW": "Dallas",
+    "DTW": "Detroit",
+    "EWR": "Newark",
+    "GNV": "Gainesville",
+    "IAH": "Houston",
+    "ITH": "Ithaca",
+    "JFK": "New York",
+    "LAS": "Las Vegas",
+    "LAX": "Los Angeles",
+    "MCI": "Kansas City",
+    "MCO": "Orlando",
+    "MIA": "Miami",
+    "MSP": "Minneapolis",
+    "OAK": "Oakland",
+    "ORD": "Chicago",
+    "PDX": "Portland",
+    "PHL": "Philadelphia",
+    "PHX": "Phoenix",
+    "PIT": "Pittsburgh",
+    "RDU": "Raleigh",
+    "SAN": "San Diego",
+    "SAT": "San Antonio",
+    "SEA": "Seattle",
+    "SFO": "San Francisco",
+    "SJC": "San Jose",
+    "SLC": "Salt Lake City",
+    "SNA": "Irvine",
+    "STL": "St. Louis",
+}
+
+DEFAULT_AIRPORT_CITY_MAP_PATH = Path(__file__).resolve().parents[2] / "data" / "airport_city_map.json"
+
 OUTPUT_FIELDS = [
     "id",
     "origin_airport",
     "destination_airport",
+    "city",
     "avg_outbound_price",
     "avg_return_price",
     "avg_outbound_duration_minutes",
@@ -125,6 +171,18 @@ def parse_bool_like(raw: Any) -> bool:
     return text in {"1", "true", "yes", "y"}
 
 
+def normalize_airport_code(raw: Any) -> str | None:
+    token = normalize_space(raw)
+    if not token:
+        return None
+    token = token.upper()
+    if len(token) == 4 and token.startswith("K") and token[1:].isalpha():
+        token = token[1:]
+    if len(token) == 3 and token.isalpha():
+        return token
+    return None
+
+
 def airport_timezone_map(extra_overrides: list[str]) -> dict[str, str]:
     mapping = dict(FALLBACK_AIRPORT_TZ)
 
@@ -154,6 +212,42 @@ def airport_timezone_map(extra_overrides: list[str]) -> dict[str, str]:
         ZoneInfo(tz_name)
         mapping[code] = tz_name
 
+    return mapping
+
+
+def airport_city_map(path: Path | None) -> dict[str, str]:
+    mapping = dict(DEFAULT_AIRPORT_TO_CITY)
+    map_path = path
+    if map_path is None and DEFAULT_AIRPORT_CITY_MAP_PATH.exists():
+        map_path = DEFAULT_AIRPORT_CITY_MAP_PATH
+    if map_path is None:
+        return mapping
+
+    with map_path.open("r", encoding="utf-8") as fh:
+        payload = json.load(fh)
+
+    loaded = 0
+    if isinstance(payload, dict):
+        items = payload.items()
+    elif isinstance(payload, list):
+        items = []
+        for row in payload:
+            if not isinstance(row, dict):
+                continue
+            code = row.get("airport_code") or row.get("iata") or row.get("code")
+            city = row.get("city")
+            items.append((code, city))
+    else:
+        raise ValueError("airport-city map must be either a JSON object or array of objects")
+
+    for code_raw, city_raw in items:
+        code = normalize_airport_code(code_raw)
+        city = normalize_space(city_raw)
+        if code and city and code not in mapping:
+            mapping[code] = city
+            loaded += 1
+
+    log(f"Loaded {loaded} airport→city entries from {map_path}")
     return mapping
 
 
@@ -214,6 +308,7 @@ def write_output(rows: list[dict[str, Any]], output_path: Path, output_format: s
 def format_for_routes(
     raw_rows: list[dict[str, str]],
     airport_tz: dict[str, str],
+    airport_to_city: dict[str, str],
     orientation: str,
     id_start: int,
 ) -> tuple[list[dict[str, Any]], int]:
@@ -282,6 +377,7 @@ def format_for_routes(
                 "id": 0,
                 "origin_airport": origin,
                 "destination_airport": destination,
+                "city": airport_to_city.get(origin),
                 "avg_outbound_price": outbound.avg_price(),
                 "avg_return_price": inbound.avg_price(),
                 "avg_outbound_duration_minutes": outbound.avg_duration(),
@@ -322,6 +418,15 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
         default=[],
         help="Override timezone mapping (repeatable): CODE=Area/City",
     )
+    parser.add_argument(
+        "--airport-city-map",
+        default=None,
+        help=(
+            "Optional JSON mapping for city field. "
+            "Accepts {\"LAX\":\"Los Angeles\"} or [{\"airport_code\":\"LAX\",\"city\":\"Los Angeles\"}]."
+            " Defaults to data_pipeline/data/airport_city_map.json when present."
+        ),
+    )
     return parser.parse_args(argv)
 
 
@@ -343,6 +448,17 @@ def main(argv: list[str]) -> int:
     log(f"Loaded airport timezone mappings: {len(airport_tz)}")
 
     try:
+        airport_city_map_path = Path(args.airport_city_map).expanduser().resolve() if args.airport_city_map else None
+        if airport_city_map_path and not airport_city_map_path.exists():
+            print(f"Airport-city map not found: {airport_city_map_path}", file=sys.stderr)
+            return 2
+        airport_to_city = airport_city_map(airport_city_map_path)
+    except Exception as exc:
+        print(f"Failed to load airport-city mapping: {exc}", file=sys.stderr)
+        return 2
+    log(f"Loaded airport-city mappings: {len(airport_to_city)}")
+
+    try:
         rows = read_rows(input_path)
     except Exception as exc:
         print(f"Failed to read input CSV: {exc}", file=sys.stderr)
@@ -352,6 +468,7 @@ def main(argv: list[str]) -> int:
     formatted_rows, skipped = format_for_routes(
         raw_rows=rows,
         airport_tz=airport_tz,
+        airport_to_city=airport_to_city,
         orientation=args.orientation,
         id_start=args.id_start,
     )

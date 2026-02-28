@@ -34,8 +34,9 @@ The orchestrator for all flows is `data_pipeline/run_pipeline.js`.
 - `data_pipeline/loaders/load_routes.js`: routes loader.
 - `data_pipeline/loaders/load_lodging.js`: lodging loader.
 - `data_pipeline/data/routes_weighted_post2020.json`: commit-friendly trimmed routes dataset.
+- `data_pipeline/data/airport_city_map.json`: airport code → city mapping used by routes formatter/loader.
 - `data_pipeline/data/lodging_formatted.json`: commit-friendly US city lodging rates.
-- `data_pipeline/data/us_city_hotel_average_prices.csv`: source hotel average-price data by US city.
+- `data_pipeline/data/us_city_hotel_average_prices.csv`: source hotel average-price data (city-name or airport-code keyed).
 
 ## Prerequisites
 
@@ -189,12 +190,17 @@ node data_pipeline/loaders/load_lodging.js \
 - `--routes-input <path>`: preformatted routes JSON to load directly.
 - `--flights-input <path>`: raw flights CSV (required only when `--routes-input` is not provided).
 - `--routes-table <name>`: target routes table (default `routes` or `ROUTES_TABLE`).
+- Flight formatter output includes both airport codes and a derived origin `city` field so routes can be joined with city-keyed lodging data.
+- Default airport→city mapping source: `data_pipeline/data/airport_city_map.json` (override in formatter with `--airport-city-map`).
 
 ### Hotels flags
 
 - `--include-hotels`: run lodging formatter + loader.
 - `--lodging-input <path>`: preformatted lodging JSON to load directly.
-- `--hotels-input <path>`: raw hotel average-prices CSV (required only when `--lodging-input` is not provided).
+- `--hotels-input <path>`: raw hotel average-prices CSV (required only when `--lodging-input` is not provided). Supported inputs:
+  - `city_name` (or `city`) + `average_price`
+  - or airport code columns (`airport_code` / `iata` / `iata_code` / `destination_airport`) + `average_price`
+  - airport-code rows get a derived `city` field while preserving `airport_code` in formatter output
 - `--lodging-table <name>`: target lodging table (default `lodging` or `LODGING_TABLE`).
 
 ## Individual script usage
@@ -265,6 +271,16 @@ node data_pipeline/loaders/load_routes.js \
 Lodging:
 
 ```bash
+python3 data_pipeline/src/formatters/hotels.py \
+  --input data_pipeline/data/us_city_hotel_average_prices.csv \
+  --output data_pipeline/output/lodging_formatted.json
+
+# Optional when your input rows use airport codes:
+python3 data_pipeline/src/formatters/hotels.py \
+  --input /path/to/hotels_by_airport.csv \
+  --output data_pipeline/output/lodging_formatted.json \
+  --airport-city-map /path/to/airport_city_map.json
+
 node data_pipeline/loaders/load_lodging.js \
   --input data_pipeline/output/lodging_formatted.json \
   --table lodging

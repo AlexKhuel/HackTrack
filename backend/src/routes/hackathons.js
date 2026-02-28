@@ -64,7 +64,7 @@ router.get('/feasible', async (req, res) => {
     // 2. Fetch all routes from this origin airport
     const { data: routes, error: routeErr } = await supabase
       .from('routes')
-      .select('destination_airport, avg_outbound_price, avg_return_price, avg_outbound_duration_minutes, avg_return_duration_minutes')
+      .select('destination_airport, city, avg_outbound_price, avg_return_price, avg_outbound_duration_minutes, avg_return_duration_minutes')
       .eq('origin_airport', origin_airport);
 
     if (routeErr) return res.status(500).json({ error: routeErr.message });
@@ -113,6 +113,7 @@ router.get('/feasible', async (req, res) => {
         route: {
           origin_airport,
           destination_airport:             destAirport,
+          city:                            route.city ?? null,
           avg_outbound_price:              route.avg_outbound_price,
           avg_return_price:                route.avg_return_price,
           avg_outbound_duration_minutes:   route.avg_outbound_duration_minutes,

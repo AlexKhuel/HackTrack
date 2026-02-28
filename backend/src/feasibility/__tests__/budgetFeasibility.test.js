@@ -27,6 +27,7 @@ describe('resolveAirport', () => {
     expect(resolveAirport('sf')).toBe('SFO');
     expect(resolveAirport('DC')).toBe('DCA');
     expect(resolveAirport('Berkeley')).toBe('SFO');
+    expect(resolveAirport('Irvine')).toBe('SNA');
   });
 
   test('returns null for unknown city', () => {
@@ -37,6 +38,12 @@ describe('resolveAirport', () => {
 
   test('trims whitespace', () => {
     expect(resolveAirport('  Boston  ')).toBe('BOS');
+  });
+
+  test('parses venue-style location segments', () => {
+    expect(resolveAirport('UCI Student Center - Pacific Ballroom, Irvine, CA')).toBe('SNA');
+    expect(resolveAirport('Frontier Tower - SF')).toBe('SFO');
+    expect(resolveAirport('Boston, MA')).toBe('BOS');
   });
 });
 

@@ -1,5 +1,17 @@
 'use strict';
 
+function normalizeCityToken(value) {
+  if (typeof value !== 'string') return null;
+  const normalized = value
+    .toLowerCase()
+    .replace(/&/g, ' and ')
+    .replace(/[().]/g, ' ')
+    .replace(/[^a-z0-9\s]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+  return normalized || null;
+}
+
 // City name (lowercase) → primary IATA airport code
 const CITY_TO_AIRPORT = {
   // Northeast
@@ -34,6 +46,7 @@ const CITY_TO_AIRPORT = {
   'saint louis':         'STL',
   'kansas city':         'MCI',
   'cleveland':           'CLE',
+  'fort worth':          'DFW',
   // South / Southwest
   'austin':              'AUS',
   'dallas':              'DFW',
@@ -57,13 +70,25 @@ const CITY_TO_AIRPORT = {
   'ann arbor':           'DTW',
   'ithaca':              'ITH',
   'champaign':           'CMI',
+  'urbana':              'CMI',
   'gainesville':         'GNV',
+  'irvine':              'SNA',
   'berkeley':            'SFO',
   'palo alto':           'SFO',
   'stanford':            'SFO',
   'cambridge ma':        'BOS',
   'worcester':           'BOS',
 };
+
+const NORMALIZED_CITY_TO_AIRPORT = Object.freeze(
+  Object.entries(CITY_TO_AIRPORT).reduce((acc, [city, airport]) => {
+    const normalized = normalizeCityToken(city);
+    if (normalized) {
+      acc[normalized] = airport;
+    }
+    return acc;
+  }, {})
+);
 
 // City cost bands for lodging heuristic (2 nights: Fri + Sat)
 const LODGING_NIGHTLY = {
@@ -84,7 +109,24 @@ const MEDIUM_COST_AIRPORTS = new Set(['ORD', 'AUS', 'LAX', 'MIA', 'DEN', 'ATL', 
  */
 function resolveAirport(city) {
   if (!city) return null;
-  return CITY_TO_AIRPORT[city.toLowerCase().trim()] ?? null;
+
+  const normalized = normalizeCityToken(city);
+  if (!normalized) return null;
+
+  const directMatch = NORMALIZED_CITY_TO_AIRPORT[normalized];
+  if (directMatch) return directMatch;
+
+  const compoundSegments = String(city)
+    .split(/,|\/|\||@|(?:\s[-–—]\s)/)
+    .map((segment) => normalizeCityToken(segment))
+    .filter(Boolean);
+
+  for (const segment of compoundSegments) {
+    const airport = NORMALIZED_CITY_TO_AIRPORT[segment];
+    if (airport) return airport;
+  }
+
+  return null;
 }
 
 /**

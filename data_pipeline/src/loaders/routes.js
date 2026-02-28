@@ -1,12 +1,101 @@
 #!/usr/bin/env node
 
 const fs = require('node:fs/promises');
+const fsSync = require('node:fs');
 const path = require('node:path');
 const { Client } = require('pg');
 const dotenv = require('dotenv');
 
 const SCRIPT_DIR = __dirname;
 const REPO_ROOT = path.resolve(SCRIPT_DIR, '../../..');
+const AIRPORT_CITY_MAP_PATH = path.join(REPO_ROOT, 'data_pipeline', 'data', 'airport_city_map.json');
+
+const DEFAULT_AIRPORT_TO_CITY = Object.freeze({
+  ATL: 'Atlanta',
+  AUS: 'Austin',
+  BNA: 'Nashville',
+  BOS: 'Boston',
+  BWI: 'Baltimore',
+  CLE: 'Cleveland',
+  CLT: 'Charlotte',
+  CMH: 'Columbus',
+  CMI: 'Champaign',
+  DCA: 'Washington',
+  DEN: 'Denver',
+  DFW: 'Dallas',
+  DTW: 'Detroit',
+  EWR: 'Newark',
+  GNV: 'Gainesville',
+  IAH: 'Houston',
+  ITH: 'Ithaca',
+  JFK: 'New York',
+  LAS: 'Las Vegas',
+  LAX: 'Los Angeles',
+  MCI: 'Kansas City',
+  MCO: 'Orlando',
+  MIA: 'Miami',
+  MSP: 'Minneapolis',
+  OAK: 'Oakland',
+  ORD: 'Chicago',
+  PDX: 'Portland',
+  PHL: 'Philadelphia',
+  PHX: 'Phoenix',
+  PIT: 'Pittsburgh',
+  RDU: 'Raleigh',
+  SAN: 'San Diego',
+  SAT: 'San Antonio',
+  SEA: 'Seattle',
+  SFO: 'San Francisco',
+  SJC: 'San Jose',
+  SLC: 'Salt Lake City',
+  SNA: 'Irvine',
+  STL: 'St. Louis',
+});
+
+function loadAirportCityMap() {
+  const mapping = { ...DEFAULT_AIRPORT_TO_CITY };
+
+  if (!fsSync.existsSync(AIRPORT_CITY_MAP_PATH)) {
+    return mapping;
+  }
+
+  const normalizeCode = (value) => {
+    if (value == null) return null;
+    let token = String(value).trim().toUpperCase();
+    if (!token) return null;
+    if (token.length === 4 && token.startsWith('K') && /^[A-Z]{4}$/.test(token)) {
+      token = token.slice(1);
+    }
+    return /^[A-Z]{3}$/.test(token) ? token : null;
+  };
+
+  try {
+    const payload = JSON.parse(fsSync.readFileSync(AIRPORT_CITY_MAP_PATH, 'utf8'));
+    if (Array.isArray(payload)) {
+      for (const row of payload) {
+        if (!row || typeof row !== 'object') continue;
+        const code = normalizeCode(row.airport_code ?? row.iata ?? row.code);
+        const city = typeof row.city === 'string' ? row.city.trim() : '';
+        if (code && city && !(code in mapping)) mapping[code] = city;
+      }
+      return mapping;
+    }
+
+    if (payload && typeof payload === 'object') {
+      for (const [rawCode, rawCity] of Object.entries(payload)) {
+        const code = normalizeCode(rawCode);
+        const city = typeof rawCity === 'string' ? rawCity.trim() : '';
+        if (code && city && !(code in mapping)) mapping[code] = city;
+      }
+    }
+  } catch (_) {
+    // Keep defaults if mapping file cannot be parsed.
+  }
+
+  return mapping;
+}
+
+const AIRPORT_TO_CITY = Object.freeze(loadAirportCityMap());
 
 function timestamp() {
   return new Date().toISOString();
@@ -94,6 +183,31 @@ async function readCleanedRows(inputPath) {
   return parsed.filter((row) => row && typeof row === 'object' && !Array.isArray(row));
 }
 
+function normalizeAirportCode(raw) {
+  if (raw == null) return null;
+  let token = String(raw).trim().toUpperCase();
+  if (!token) return null;
+  if (token.length === 4 && token.startsWith('K') && /^[A-Z]{4}$/.test(token)) {
+    token = token.slice(1);
+  }
+  if (/^[A-Z]{3}$/.test(token)) return token;
+  return null;
+}
+
+function normalizeCity(raw) {
+  if (raw == null) return null;
+  const token = String(raw).trim();
+  return token || null;
+}
+
+function resolveRouteCity(row) {
+  const explicitCity = normalizeCity(row.city);
+  if (explicitCity) return explicitCity;
+  const originAirport = normalizeAirportCode(row.origin_airport);
+  if (!originAirport) return null;
+  return AIRPORT_TO_CITY[originAirport] ?? null;
+}
+
 function prepareInsertRows(cleanedRows) {
   const rowsToInsert = [];
 
@@ -105,6 +219,7 @@ function prepareInsertRows(cleanedRows) {
     const avgReturnPrice = row.avg_return_price ?? null;
     const avgOutboundDuration = row.avg_outbound_duration_minutes ?? null;
     const avgReturnDuration = row.avg_return_duration_minutes ?? null;
+    const city = resolveRouteCity(row);
 
     // Extract just the departure_scheduled timestamps for the Supabase array column
     const departureTimes = row.scheduled_flights
@@ -124,6 +239,7 @@ function prepareInsertRows(cleanedRows) {
       avgOutboundDuration,
       avgReturnDuration,
       departureTimes,
+      city,
     ]);
   }
 
@@ -143,6 +259,7 @@ async function insertBatch(client, table, rows) {
     'avg_outbound_duration_minutes',
     'avg_return_duration_minutes',
     'departure_times',
+    'city',
   ];
 
   const values = [];
@@ -168,7 +285,8 @@ async function insertBatch(client, table, rows) {
       avg_return_price,
       avg_outbound_duration_minutes,
       avg_return_duration_minutes,
-      departure_times
+      departure_times,
+      city
     ) VALUES ${placeholders.join(', ')}
     ON CONFLICT (id) DO UPDATE SET
       origin_airport = EXCLUDED.origin_airport,
@@ -177,7 +295,8 @@ async function insertBatch(client, table, rows) {
       avg_return_price = EXCLUDED.avg_return_price,
       avg_outbound_duration_minutes = EXCLUDED.avg_outbound_duration_minutes,
       avg_return_duration_minutes = EXCLUDED.avg_return_duration_minutes,
-      departure_times = EXCLUDED.departure_times
+      departure_times = EXCLUDED.departure_times,
+      city = EXCLUDED.city
   `;
 
   await client.query(sql, values);

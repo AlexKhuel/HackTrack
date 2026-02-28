@@ -28,14 +28,18 @@ from __future__ import annotations
 
 import argparse
 import csv
+import html
 import json
 import re
 import sys
+import time
 from collections import OrderedDict
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 from urllib.parse import urlparse, urlunparse
+
+import requests
 
 DEFAULT_OUTPUT_FIELDS = [
     "source",
@@ -53,6 +57,66 @@ SPACE_RE = re.compile(r"\s+")
 NON_ALNUM_RE = re.compile(r"[^a-z0-9]+")
 NUMBER_RE = re.compile(r"(?<!\d)(\d{1,3}(?:,\d{2,3})+|\d+(?:\.\d+)?)([kKmM]?)(?!\d)")
 ONLINE_RE = re.compile(r"\b(online|virtual|remote|worldwide|global)\b", re.IGNORECASE)
+LOCATION_SEGMENT_SPLIT_RE = re.compile(r"\s*(?:-|/|\||@|–|—)\s*")
+TRAILING_NUMBER_RE = re.compile(r"\s+\d+[a-z]?$", re.IGNORECASE)
+VENUE_HINT_RE = re.compile(
+    r"\b(?:hall|center|centre|building|campus|auditorium|library|room|floor|"
+    r"tower|lounge|ballroom|commons|lab|laboratory|office|university|college|"
+    r"school|institute|academy)\b",
+    re.IGNORECASE,
+)
+ADDRESS_HINT_RE = re.compile(
+    r"\b(?:street|avenue|road|boulevard|lane|drive|suite)\b",
+    re.IGNORECASE,
+)
+CITY_ABBREVIATIONS = {"SF", "NYC", "DC", "LA"}
+CITY_NAME_EXCEPTIONS = {
+    "state college",
+    "college station",
+    "college park",
+    "university place",
+}
+STRICT_CITY_ADDRESS_KEYS = ("city", "town", "village", "municipality")
+SECONDARY_CITY_ADDRESS_KEYS = ("hamlet",)
+NOMINATIM_SEARCH_URL = "https://nominatim.openstreetmap.org/search"
+LOOKUP_TOKEN_RE = re.compile(r"[A-Za-z0-9]+")
+LOOKUP_STOPWORDS = {
+    "the",
+    "and",
+    "for",
+    "with",
+    "of",
+    "in",
+    "at",
+    "on",
+    "a",
+    "an",
+    "university",
+    "college",
+    "institute",
+    "school",
+    "hall",
+    "center",
+    "centre",
+    "building",
+    "campus",
+    "auditorium",
+    "library",
+    "room",
+    "floor",
+    "tower",
+    "lounge",
+    "ballroom",
+    "commons",
+    "office",
+    "student",
+    "science",
+    "engineering",
+    "technology",
+    "academy",
+    "block",
+    "lab",
+}
 
 # Currency detection patterns (mirrors scraper output formats).
 SYMBOL_AMOUNT_RE = re.compile(
@@ -417,6 +481,114 @@ def infer_country(parts: list[str]) -> str | None:
     return None
 
 
+def is_region_token(part: str) -> bool:
+    token = part.strip().upper().rstrip(".")
+    if not token:
+        return False
+    return token in US_STATE_CODES or token in US_STATE_NAMES or token in COUNTRY_ALIASES
+
+
+def is_likely_venue(part: str) -> bool:
+    if not part:
+        return False
+    normalized = normalize_space(part)
+    if normalized and normalized.casefold() in CITY_NAME_EXCEPTIONS:
+        return False
+    if ADDRESS_HINT_RE.search(part):
+        return True
+    lowered = part.casefold()
+    if VENUE_HINT_RE.search(part):
+        return True
+    return " room " in f" {lowered} "
+
+
+def is_city_like_name(part: str | None) -> bool:
+    city = normalize_space(part)
+    if not city:
+        return False
+
+    lowered = city.casefold()
+    if lowered in {"online", "unknown"}:
+        return True
+    if lowered in CITY_NAME_EXCEPTIONS:
+        return True
+
+    if is_short_upper_code(city):
+        return False
+    if is_likely_venue(city):
+        return False
+    if ADDRESS_HINT_RE.search(city):
+        return False
+    if re.search(r"\d", city):
+        return False
+
+    tokens = [token for token in LOOKUP_TOKEN_RE.findall(city) if token]
+    if not tokens:
+        return False
+    if all(token.casefold() in LOOKUP_STOPWORDS for token in tokens):
+        return False
+    return True
+
+
+def normalize_location_candidate(part: str) -> str | None:
+    cleaned = normalize_space(part.strip(" -"))
+    if not cleaned:
+        return None
+    trimmed = normalize_space(TRAILING_NUMBER_RE.sub("", cleaned)) or cleaned
+    return trimmed
+
+
+def is_short_upper_code(part: str) -> bool:
+    letters_only = re.sub(r"[^A-Za-z]", "", part)
+    if not letters_only:
+        return False
+    if letters_only.upper() in CITY_ABBREVIATIONS:
+        return False
+    return letters_only.isupper() and len(letters_only) <= 5
+
+
+def extract_city_from_fragment(fragment: str) -> str | None:
+    base = normalize_space(fragment)
+    if not base:
+        return None
+
+    split_tokens = [normalize_space(token) for token in LOCATION_SEGMENT_SPLIT_RE.split(base)]
+    split_tokens = [token for token in split_tokens if token]
+    if len(split_tokens) > 1:
+        for token in reversed(split_tokens):
+            candidate = normalize_location_candidate(token)
+            if not candidate:
+                continue
+            if is_region_token(candidate) or is_likely_venue(candidate) or is_short_upper_code(candidate):
+                continue
+            return candidate
+
+    candidate = normalize_location_candidate(base)
+    if not candidate:
+        return None
+    if is_region_token(candidate) or is_likely_venue(candidate) or is_short_upper_code(candidate):
+        return None
+    return candidate
+
+
+def choose_city_from_parts(parts: list[str]) -> str | None:
+    if not parts:
+        return None
+
+    trimmed_parts = list(parts)
+    while trimmed_parts and is_region_token(trimmed_parts[-1]):
+        trimmed_parts.pop()
+    if not trimmed_parts:
+        return None
+
+    for part in reversed(trimmed_parts):
+        candidate = extract_city_from_fragment(part)
+        if candidate:
+            return candidate
+
+    return extract_city_from_fragment(trimmed_parts[0])
+
+
 def parse_city_country_in_person(raw_city: str | None) -> tuple[str | None, str | None, bool | None]:
     city_text = normalize_space(raw_city)
     if not city_text:
@@ -425,20 +597,326 @@ def parse_city_country_in_person(raw_city: str | None) -> tuple[str | None, str 
     if ONLINE_RE.search(city_text):
         return None, None, False
 
-    parts = [part.strip(" -") for part in city_text.split(",")]
+    parts = [normalize_space(part.strip(" -")) for part in city_text.split(",")]
     parts = [part for part in parts if part]
     if not parts:
         return None, None, None
 
     country = infer_country(parts)
-    city = normalize_space(parts[0])
+    city = choose_city_from_parts(parts)
 
     if len(parts) == 1:
         token = parts[0].upper().rstrip(".")
         if token in COUNTRY_ALIASES:
             return None, COUNTRY_ALIASES[token], None
 
+    if city and not is_city_like_name(city):
+        city = None
+
     return city, country, True
+
+
+def default_city_lookup_cache_path() -> Path:
+    return Path(__file__).resolve().parents[2] / "data" / "location_city_cache.json"
+
+
+def load_city_lookup_cache(path: Path) -> dict[str, dict[str, str | None]]:
+    if not path.exists():
+        return {}
+
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return {}
+
+    if not isinstance(payload, dict):
+        return {}
+
+    cache: dict[str, dict[str, str | None]] = {}
+    for key, value in payload.items():
+        if not isinstance(key, str) or not isinstance(value, dict):
+            continue
+        city = normalize_space(value.get("city"))
+        country = normalize_space(value.get("country"))
+        if city and not is_city_like_name(city):
+            city = None
+        cache[key] = {"city": city, "country": country}
+    return cache
+
+
+def save_city_lookup_cache(path: Path, cache: dict[str, dict[str, str | None]]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    serialized = {
+        key: {"city": value.get("city"), "country": value.get("country")}
+        for key, value in sorted(cache.items())
+    }
+    path.write_text(json.dumps(serialized, indent=2, ensure_ascii=False), encoding="utf-8")
+
+
+def build_city_lookup_cache_key(raw_location: str, url: str | None) -> str:
+    host = urlparse(url).netloc.casefold().strip() if url else ""
+    return f"{raw_location.casefold()}|{host}"
+
+
+def build_city_lookup_queries(raw_location: str, event_name: str | None) -> list[str]:
+    base = normalize_space(html.unescape(raw_location))
+    if not base:
+        return []
+
+    queries: list[str] = []
+    seen: set[str] = set()
+
+    def add(candidate: str | None) -> None:
+        cleaned = normalize_space(candidate)
+        if not cleaned:
+            return
+        key = cleaned.casefold()
+        if key in seen:
+            return
+        seen.add(key)
+        queries.append(cleaned)
+
+    add(base)
+
+    comma_parts = [normalize_space(part.strip(" -")) for part in base.split(",")]
+    comma_parts = [part for part in comma_parts if part]
+    if len(comma_parts) > 1:
+        add(", ".join(comma_parts[:-1]))
+        add(", ".join(comma_parts[:2]))
+        add(comma_parts[0])
+        add(comma_parts[-2])
+
+    split_parts = [normalize_space(part) for part in LOCATION_SEGMENT_SPLIT_RE.split(base)]
+    split_parts = [part for part in split_parts if part]
+    if len(split_parts) > 1:
+        add(", ".join(split_parts[:-1]))
+        add(split_parts[0])
+        for part in split_parts:
+            if not is_likely_venue(part) and not is_short_upper_code(part):
+                add(part)
+
+    if event_name:
+        primary = split_parts[0] if split_parts else base
+        add(f"{event_name} {primary}")
+
+    return queries[:6]
+
+
+def extract_lookup_tokens(query: str) -> list[str]:
+    tokens: list[str] = []
+    seen: set[str] = set()
+    for token in LOOKUP_TOKEN_RE.findall(query):
+        if token.isdigit():
+            continue
+        lowered = token.casefold()
+        if lowered in LOOKUP_STOPWORDS:
+            continue
+        if len(token) >= 4 or (token.isupper() and 2 <= len(token) <= 5):
+            if lowered not in seen:
+                seen.add(lowered)
+                tokens.append(lowered)
+    return tokens
+
+
+def extract_city_country_from_lookup_result(result: dict[str, Any]) -> tuple[str | None, str | None]:
+    address = result.get("address")
+    if not isinstance(address, dict):
+        return None, None
+
+    city = None
+    for key in STRICT_CITY_ADDRESS_KEYS:
+        candidate = normalize_space(address.get(key))
+        if candidate and is_city_like_name(candidate):
+            city = candidate
+            break
+
+    if city is None:
+        # Limited fallback for locales where "hamlet" is the closest city-level value.
+        for key in SECONDARY_CITY_ADDRESS_KEYS:
+            candidate = normalize_space(address.get(key))
+            if candidate and is_city_like_name(candidate):
+                city = candidate
+                break
+
+    country = normalize_space(address.get("country"))
+    return city, country
+
+
+def score_lookup_result(result: dict[str, Any], tokens: list[str]) -> tuple[int, float]:
+    display_name = normalize_space(result.get("display_name")) or ""
+    lowered = display_name.casefold()
+    token_hits = sum(1 for token in tokens if token in lowered)
+
+    importance_raw = result.get("importance")
+    try:
+        importance = float(importance_raw)
+    except (TypeError, ValueError):
+        importance = 0.0
+
+    return token_hits, importance
+
+
+def resolve_city_with_online_lookup(
+    *,
+    raw_location: str,
+    event_name: str | None,
+    url: str | None,
+    country_hint: str | None,
+    session: requests.Session,
+    cache: dict[str, dict[str, str | None]],
+    timeout_seconds: float,
+    min_request_interval_seconds: float,
+    last_request_at: list[float],
+) -> tuple[str | None, str | None, bool]:
+    cache_key = build_city_lookup_cache_key(raw_location, url)
+    cached = cache.get(cache_key)
+    if cached is not None:
+        return cached.get("city"), cached.get("country"), True
+
+    queries = build_city_lookup_queries(raw_location, event_name)
+    country_hint_normalized = normalize_space(country_hint)
+    country_hint_token = country_hint_normalized.casefold() if country_hint_normalized else None
+
+    for query in queries:
+        elapsed = time.monotonic() - last_request_at[0]
+        wait_seconds = min_request_interval_seconds - elapsed
+        if wait_seconds > 0:
+            time.sleep(wait_seconds)
+
+        try:
+            response = session.get(
+                NOMINATIM_SEARCH_URL,
+                params={"q": query, "format": "jsonv2", "limit": 5, "addressdetails": 1},
+                timeout=timeout_seconds,
+            )
+            last_request_at[0] = time.monotonic()
+            response.raise_for_status()
+            payload = response.json()
+        except (requests.RequestException, ValueError):
+            continue
+
+        if not isinstance(payload, list):
+            continue
+
+        tokens = extract_lookup_tokens(query)
+        best: tuple[tuple[int, float], str, str | None] | None = None
+        for item in payload:
+            if not isinstance(item, dict):
+                continue
+            city, country = extract_city_country_from_lookup_result(item)
+            if not city:
+                continue
+
+            token_hits, importance = score_lookup_result(item, tokens)
+            if tokens and token_hits == 0:
+                continue
+
+            if country_hint_token and country:
+                country_token = country.casefold()
+                if country_hint_token not in country_token and country_token not in country_hint_token:
+                    importance -= 1.0
+
+            rank = (token_hits, importance)
+            if best is None or rank > best[0]:
+                best = (rank, city, country)
+
+        if best is not None:
+            _, city, country = best
+            cache[cache_key] = {"city": city, "country": country}
+            return city, country, False
+
+    cache[cache_key] = {"city": None, "country": None}
+    return None, None, False
+
+
+def fallback_city_from_raw_location(raw_location: str) -> str:
+    candidate = normalize_space(raw_location) or "Unknown"
+    if is_likely_venue(candidate) or is_short_upper_code(candidate):
+        return "Unknown"
+    return candidate
+
+
+def enrich_missing_cities(
+    records: list[dict[str, Any]],
+    *,
+    enable_online_lookup: bool,
+    cache: dict[str, dict[str, str | None]],
+    timeout_seconds: float,
+    min_request_interval_seconds: float,
+) -> dict[str, int]:
+    stats = {
+        "resolved_online": 0,
+        "cache_hits": 0,
+        "fallback_raw_location": 0,
+        "set_online_label": 0,
+        "set_unknown": 0,
+    }
+
+    session: requests.Session | None = None
+    last_request_at = [0.0]
+
+    if enable_online_lookup:
+        session = requests.Session()
+        session.headers.update(
+            {
+                "User-Agent": (
+                    "Irvine-Hacks-City-Resolver/1.0 "
+                    "(https://github.com/joshuadowd/Irvine-Hacks)"
+                )
+            }
+        )
+
+    try:
+        for record in records:
+            existing_city = normalize_space(record.get("city"))
+            if existing_city and is_city_like_name(existing_city):
+                continue
+            if existing_city and not is_city_like_name(existing_city):
+                record["city"] = None
+
+            if record.get("in_person") is False:
+                record["city"] = "Online"
+                stats["set_online_label"] += 1
+                continue
+
+            raw_location = normalize_space(html.unescape(str(record.get("_raw_city") or "")))
+            if not raw_location:
+                record["city"] = "Unknown"
+                stats["set_unknown"] += 1
+                continue
+
+            if enable_online_lookup and session is not None:
+                resolved_city, resolved_country, from_cache = resolve_city_with_online_lookup(
+                    raw_location=raw_location,
+                    event_name=normalize_space(record.get("name")),
+                    url=normalize_url(record.get("url")),
+                    country_hint=normalize_space(record.get("country")),
+                    session=session,
+                    cache=cache,
+                    timeout_seconds=timeout_seconds,
+                    min_request_interval_seconds=min_request_interval_seconds,
+                    last_request_at=last_request_at,
+                )
+                if from_cache:
+                    stats["cache_hits"] += 1
+                if resolved_city:
+                    record["city"] = resolved_city
+                    if not record.get("country") and resolved_country:
+                        record["country"] = resolved_country
+                    stats["resolved_online"] += 1
+                    continue
+
+            fallback_city = fallback_city_from_raw_location(raw_location)
+            record["city"] = fallback_city
+            if fallback_city == "Unknown":
+                stats["set_unknown"] += 1
+            else:
+                stats["fallback_raw_location"] += 1
+    finally:
+        if session is not None:
+            session.close()
+
+    return stats
 
 
 def choose_text(preferred: str | None, candidate: str | None) -> str | None:
@@ -538,6 +1016,7 @@ def merge_records(left: dict[str, Any], right: dict[str, Any]) -> dict[str, Any]
 
     merged["name"] = choose_text(left.get("name"), right.get("name"))
     merged["city"] = choose_text(left.get("city"), right.get("city"))
+    merged["_raw_city"] = choose_text(left.get("_raw_city"), right.get("_raw_city"))
     merged["country"] = choose_text(left.get("country"), right.get("country"))
     merged["start_datetime_utc"] = choose_start_datetime(
         left.get("start_datetime_utc"), right.get("start_datetime_utc")
@@ -569,7 +1048,7 @@ def merge_records(left: dict[str, Any], right: dict[str, Any]) -> dict[str, Any]
 
 def normalize_scraped_row(row: dict[str, Any], source: str) -> dict[str, Any] | None:
     name = normalize_space(row.get("name"))
-    raw_city = normalize_space(row.get("city"))
+    raw_city = normalize_space(html.unescape(str(row.get("city") or "")))
     start_raw = row.get("start_datetime", row.get("start_datetime_utc"))
     end_raw = row.get("end_datetime", row.get("end_datetime_utc"))
     prize_raw = row.get("total_prize", row.get("prize_pool"))
@@ -580,11 +1059,14 @@ def normalize_scraped_row(row: dict[str, Any], source: str) -> dict[str, Any] | 
         return None
 
     city, country, in_person = parse_city_country_in_person(raw_city)
+    if city and not is_city_like_name(city):
+        city = None
 
     normalized: dict[str, Any] = {
         "source": source,
         "name": name,
         "city": city,
+        "_raw_city": raw_city,
         "country": country,
         "start_datetime_utc": to_utc_timestamp(start_raw),
         "end_datetime_utc": to_utc_timestamp(end_raw),
@@ -765,6 +1247,28 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
         help="Output file path (JSON or CSV)",
     )
     parser.add_argument("--format", choices=("json", "csv"), default=None, help="Output format override")
+    parser.add_argument(
+        "--disable-online-city-lookup",
+        action="store_true",
+        help="Disable online lookup fallback for unresolved city values.",
+    )
+    parser.add_argument(
+        "--city-lookup-cache",
+        default=str(default_city_lookup_cache_path()),
+        help="Path to JSON cache for online city lookup results.",
+    )
+    parser.add_argument(
+        "--city-lookup-timeout",
+        type=float,
+        default=15.0,
+        help="HTTP timeout in seconds for online city lookups.",
+    )
+    parser.add_argument(
+        "--city-lookup-rate-limit",
+        type=float,
+        default=1.0,
+        help="Minimum seconds between online city-lookup requests.",
+    )
     return parser.parse_args(argv)
 
 
@@ -772,6 +1276,20 @@ def main(argv: list[str]) -> int:
     args = parse_args(argv)
     output_path = Path(args.output).expanduser().resolve()
     log(f"Starting clean_events.py (output={output_path})")
+
+    enable_online_city_lookup = not args.disable_online_city_lookup
+    city_lookup_cache_path = Path(args.city_lookup_cache).expanduser().resolve()
+    city_lookup_timeout = max(1.0, args.city_lookup_timeout)
+    city_lookup_rate_limit = max(0.0, args.city_lookup_rate_limit)
+    city_lookup_cache = load_city_lookup_cache(city_lookup_cache_path) if enable_online_city_lookup else {}
+    if enable_online_city_lookup:
+        log(
+            "Online city lookup enabled: "
+            f"cache={city_lookup_cache_path}, cached_keys={len(city_lookup_cache)}, "
+            f"timeout={city_lookup_timeout}s, min_interval={city_lookup_rate_limit}s"
+        )
+    else:
+        log("Online city lookup disabled; unresolved city values will fallback to raw location text.")
 
     script_dir = Path(__file__).resolve().parent
     repo_root = script_dir.parent
@@ -823,6 +1341,24 @@ def main(argv: list[str]) -> int:
     merged = merge_by_url(records)
     merged = merge_by_name_start(merged)
     log(f"Merged records after dedupe: {len(merged)} (from {pre_dedupe_count})")
+
+    city_stats = enrich_missing_cities(
+        merged,
+        enable_online_lookup=enable_online_city_lookup,
+        cache=city_lookup_cache,
+        timeout_seconds=city_lookup_timeout,
+        min_request_interval_seconds=city_lookup_rate_limit,
+    )
+    if enable_online_city_lookup:
+        save_city_lookup_cache(city_lookup_cache_path, city_lookup_cache)
+    log(
+        "City enrichment results: "
+        f"resolved_online={city_stats['resolved_online']}, "
+        f"cache_hits={city_stats['cache_hits']}, "
+        f"fallback_raw_location={city_stats['fallback_raw_location']}, "
+        f"set_online_label={city_stats['set_online_label']}, "
+        f"set_unknown={city_stats['set_unknown']}"
+    )
 
     merged.sort(key=lambda row: ((row.get("start_datetime_utc") or ""), (row.get("name") or "").casefold()))
     cleaned = strip_internal_fields(merged)

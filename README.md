@@ -68,6 +68,7 @@ create table routes (
   id                            bigint primary key,
   origin_airport                text,
   destination_airport           text,
+  city                          text,
   avg_outbound_price            real,
   avg_return_price              real,
   avg_outbound_duration_minutes smallint,
