@@ -73,7 +73,6 @@ def main(argv: list[str]) -> int:
     args = parse_args(argv)
 
     load_env_file(REPO_ROOT / ".env")
-    load_env_file(SCRIPT_DIR / ".env")
 
     if args.table == "events" and os.getenv("EVENTS_TABLE"):
         args.table = str(os.getenv("EVENTS_TABLE"))

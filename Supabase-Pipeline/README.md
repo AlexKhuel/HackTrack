@@ -19,8 +19,8 @@ npm install --prefix Supabase-Pipeline
 Create env file:
 
 ```bash
-cp Supabase-Pipeline/.env.example Supabase-Pipeline/.env
-# Fill SUPABASE_DB_URL
+cp .env.example .env
+# Fill SUPABASE_DB_URL in the repo root .env
 ```
 
 ## Run

@@ -17,7 +17,6 @@ function log(message) {
 
 function loadEnvFiles() {
   dotenv.config({ path: path.join(REPO_ROOT, '.env') });
-  dotenv.config({ path: path.join(SCRIPT_DIR, '.env'), override: false });
 }
 
 function parseArgs(argv) {
