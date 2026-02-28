@@ -2,6 +2,7 @@
 
 const express = require('express');
 const { spawn } = require('node:child_process');
+const fs = require('node:fs');
 const path = require('node:path');
 
 const router = express.Router();
@@ -32,15 +33,22 @@ router.post('/sync-events', checkAuth, (req, res) => {
     console.log('Admin triggered an asynchronous event data sync.');
 
     // The actual pipeline orchestrator is in the data_pipeline/ folder at the root.
-    const pipelineScript = path.resolve(__dirname, '../../../../data_pipeline/run_pipeline.js');
+    const repoRoot = path.resolve(__dirname, '../../../');
+    const pipelineScript = path.resolve(repoRoot, 'data_pipeline/run_pipeline.js');
+
+    if (!fs.existsSync(pipelineScript)) {
+        console.error(`Pipeline script not found at expected path: ${pipelineScript}`);
+        return res.status(500).json({ error: 'Pipeline script path is misconfigured.' });
+    }
 
     const args = [
         pipelineScript,
-        // By default, this scrapes MLH + Devpost + Devfolio and loads into events.
-        // Ensure flights and hotels aren't automatically pulled. (It only does if --include-xyz is passed).
+        '--include-all',
+        // Keep events/routes/lodging refreshed together to avoid cross-table drift.
     ];
 
     const child = spawn('node', args, {
+        cwd: repoRoot,
         stdio: 'inherit',
         detached: true // Let it run independently of the API request lifecycle.
     });

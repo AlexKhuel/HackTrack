@@ -198,7 +198,7 @@ def extract_city(location: str | None) -> str | None:
     if not location:
         return None
 
-    location = normalize_space(location)
+    location = normalize_space(html.unescape(str(location)))
     if not location:
         return None
 
@@ -206,8 +206,9 @@ def extract_city(location: str | None) -> str | None:
     if "online" in lowered or "virtual" in lowered:
         return "Online"
 
-    city = location.split(",", 1)[0].strip()
-    return city or location
+    # Preserve full displayed location so downstream normalization can recover
+    # actual city values from venue-style strings like "Venue, Irvine, CA".
+    return location
 
 
 def parse_amount_value(match: re.Match[str]) -> float:

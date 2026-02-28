@@ -7,7 +7,7 @@
     "pipeline": "node run_pipeline.js",
     "pipeline:all": "node run_pipeline.js --include-all",
     "pipeline:all:dry": "node run_pipeline.js --include-all --dry-run",
-    "load": "node loaders/load_to_supabase.js"
+    "load": "node src/loaders/events.js"
   },
   "dependencies": {
     "dotenv": "^16.4.5",

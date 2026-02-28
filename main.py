@@ -15,6 +15,9 @@ def root():
         "health": "/health"
     }
 
+@app.get("/score")
+def score_endpoint(max_cost: float, max_distance: float):
+    return scored(max_cost, max_distance)
 
 @app.get("/health")
 def health():
