@@ -159,13 +159,13 @@ def build_city_alias_map(booking_cities: Iterable[str]) -> dict[str, str]:
         add_alias(city, canonical)
 
         if lower.startswith("koh "):
-            add_alias(city[4:], canonical)
+            add_alias(city[4 : len(city)], canonical)
         if lower.startswith("ko "):
-            add_alias(city[3:], canonical)
+            add_alias(city[3 : len(city)], canonical)
         if lower.endswith(" beach"):
-            add_alias(city[:-6], canonical)
+            add_alias(city[: len(city) - 6], canonical)
         if lower.endswith(" city center"):
-            add_alias(city[:-12], canonical)
+            add_alias(city[: len(city) - 12], canonical)
 
     for alias, canonical in MANUAL_CITY_ALIASES.items():
         add_alias(alias, canonical)
