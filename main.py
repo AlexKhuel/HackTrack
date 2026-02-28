@@ -7,6 +7,13 @@ from db import load_events, load_routes, load_users, health_db_check
 
 app = FastAPI()
 
+@app.get("/")
+def root():
+    return {
+        "message": "HackTrack API is running 🚀",
+        "docs": "/docs",
+        "health": "/health"
+    }
 
 
 @app.get("/health")
@@ -21,15 +28,17 @@ def health_db():
 
 def debug_env():
     return {"database_url_set": bool(os.getenv("DATABASE_URL"))}
-@app.get("/events")
 
+@app.get("/events")
 def get_events():
     df = load_events()
     return df.to_dict(orient="records")
+
 @app.get("/routes")
 def get_routes():
     df = load_routes()
     return df.to_dict(orient="records")
+
 @app.get("/users")
 def get_users():
     df = load_users()  
