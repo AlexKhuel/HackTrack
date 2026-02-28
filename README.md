@@ -88,21 +88,21 @@ create table lodging (
 
 ## API
 
-### `GET /api/hackathons/feasible`
+### `GET /api/hackathons/feasible` (also available at `GET /api/events/feasible`)
 
 Returns feasible hackathons for a given user context.
 
 | Param | Required | Description |
 |---|---|---|
-| `origin_airport` | ✓ | IATA code, e.g. `LAX` |
+| `origin_airport` | ✓ | 1-3 IATA codes (supports repeated params, comma-separated text, or JSON array), e.g. `LAX` |
 | `friday_last_class_end` | ✓ | `HH:MM` in user's timezone |
 | `monday_first_class_start` | ✓ | `HH:MM` in user's timezone |
 | `user_timezone` | ✓ | IANA string, e.g. `America/New_York` |
 | `budget` | ✓ | Total all-in budget (USD) |
 | `include_lodging` | — | Default `true` |
 | `friend_cities` | — | Optional list of cities where lodging is free (supports repeated params, comma-separated text, or JSON array) |
-| `date_range_start` | — | `YYYY-MM-DD` |
-| `date_range_end` | — | `YYYY-MM-DD` |
+| `date_range_start` | — | ISO 8601 datetime with explicit timezone (`Z` or `±HH:MM`) |
+| `date_range_end` | — | ISO 8601 datetime with explicit timezone (`Z` or `±HH:MM`) |
 
 ### `POST /api/admin/sync-events`
 
@@ -118,7 +118,7 @@ Returns `{ "status": "ok" }`.
 
 **Time** — for each event, the app works backwards from the event start and end times to find the latest possible Friday departure and earliest possible Monday return. Both must fit within the user's class schedule. All timezone math is done in UTC via Luxon; DST-safe.
 
-**Budget** — maps the event city to an airport, looks up route average outbound + return prices, and uses `lodging.nightly_rate` when available (falling back to a flat `$90/night` estimate when missing). If `friend_cities` contains the destination city, lodging is treated as `$0`. The total must be within the user's budget.
+**Budget** — maps the event city to an airport. If event airport matches any provided `origin_airport`, the trip is treated as local drive (`$0` travel, `$0` lodging). Otherwise the app uses route average outbound + return prices and `lodging.nightly_rate` when available (falling back to a flat `$90/night` estimate when missing). If `friend_cities` contains the destination city, lodging is treated as `$0`. The total must be within the user's budget.
 
 ---
 

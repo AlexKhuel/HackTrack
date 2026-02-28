@@ -251,4 +251,17 @@ describe('checkBudgetFeasibility', () => {
     expect(result.feasible).toBe(false);
     expect(result.reason).toContain('Invalid route pricing data');
   });
+
+  test('travel_mode: drive → zero travel and lodging, route not required', () => {
+    const result = checkBudgetFeasibility(
+      makeEvent('Irvine'),
+      { budget: 25, include_lodging: true, travel_mode: 'drive' },
+      null
+    );
+    expect(result.feasible).toBe(true);
+    expect(result.destination_airport).toBe('SNA');
+    expect(result.estimated_flight_cost).toBe(0);
+    expect(result.estimated_lodging_cost).toBe(0);
+    expect(result.estimated_total_cost).toBe(0);
+  });
 });

@@ -240,6 +240,7 @@ function resolveAirportTimezone(airportCode) {
  * @param {number} userParams.budget            Total all-in budget in USD
  * @param {boolean} [userParams.include_lodging=true]  Whether to add lodging estimate
  * @param {boolean} [userParams.has_friend_in_city=false]  Whether lodging is free via friend stay
+ * @param {"flight"|"drive"} [userParams.travel_mode='flight']  Drive mode bypasses route pricing and lodging
  *
  * @param {Object|null} route   Row from routes table (or null if unavailable)
  * @param {number} route.avg_outbound_price
@@ -260,9 +261,11 @@ function checkBudgetFeasibility(event, userParams, route) {
     include_lodging = true,
     lodging_nightly_rate = null,
     has_friend_in_city = false,
+    travel_mode = 'flight',
   } = userParams;
 
   const destAirport = resolveAirport(event.city);
+  const travelMode = String(travel_mode).toLowerCase() === 'drive' ? 'drive' : 'flight';
 
   if (!destAirport) {
     return {
@@ -272,6 +275,19 @@ function checkBudgetFeasibility(event, userParams, route) {
       estimated_flight_cost:  null,
       estimated_lodging_cost: null,
       estimated_total_cost:   null,
+    };
+  }
+
+  if (travelMode === 'drive') {
+    const totalCost = 0;
+    const feasible = totalCost <= budget;
+    return {
+      feasible,
+      reason:                 feasible ? null : `Estimated cost $${totalCost} exceeds budget $${budget}`,
+      destination_airport:    destAirport,
+      estimated_flight_cost:  0,
+      estimated_lodging_cost: 0,
+      estimated_total_cost:   totalCost,
     };
   }
 
