@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react"
+import { useEffect, useMemo, useRef, useState } from "react"
 import northAmericaGeo from "../assets/maps/north-america.geo.json"
 
 const VIEWPORT = {
@@ -74,11 +74,19 @@ function computeDurationMs(baseDurationMs) {
 }
 
 function createFlight(slotId, route, launchDelayMs) {
+  const durationMs = computeDurationMs(route.baseDurationMs)
+  const taxiDelayMs = randomInt(GROUND_TAXI_MIN_MS, GROUND_TAXI_MAX_MS)
+  const nowMs = Date.now()
+  const launchAtMs = nowMs + launchDelayMs
+
   return {
     slotId,
     routeId: route.id,
     launchDelayMs,
-    durationMs: computeDurationMs(route.baseDurationMs),
+    launchAtMs,
+    durationMs,
+    taxiDelayMs,
+    handoffAtMs: launchAtMs + durationMs + taxiDelayMs,
     instanceId: `${route.id}-${slotId}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
   }
 }
@@ -188,6 +196,8 @@ function buildLongitudePath(longitude) {
 }
 
 export default function BackgroundScene() {
+  const timelineStartMs = useRef(Date.now())
+
   const scene = useMemo(() => {
     const countryPaths = northAmericaGeo.features
       .map((feature) => ({
@@ -259,19 +269,15 @@ export default function BackgroundScene() {
   }, [initialFlights])
 
   useEffect(() => {
+    if (!flights.length) return undefined
+
     let cancelled = false
     const timers = new Set()
 
-    const scheduleFlightLifecycle = (flight) => {
-      const handoffMs =
-        flight.launchDelayMs +
-        flight.durationMs +
-        randomInt(GROUND_TAXI_MIN_MS, GROUND_TAXI_MAX_MS)
-
+    flights.forEach((flight) => {
+      const handoffMs = Math.max(0, flight.handoffAtMs - Date.now())
       const timerId = window.setTimeout(() => {
         if (cancelled) return
-
-        let nextFlight = null
 
         setFlights((currentFlights) => {
           const currentFlight = currentFlights.find(
@@ -290,7 +296,7 @@ export default function BackgroundScene() {
 
           if (!nextRoute) return currentFlights
 
-          nextFlight = createFlight(
+          const nextFlight = createFlight(
             currentFlight.slotId,
             nextRoute,
             randomInt(RELAUNCH_MIN_MS, RELAUNCH_MAX_MS)
@@ -300,24 +306,16 @@ export default function BackgroundScene() {
             entry.slotId === currentFlight.slotId ? nextFlight : entry
           )
         })
-
-        if (!cancelled && nextFlight) {
-          scheduleFlightLifecycle(nextFlight)
-        }
       }, handoffMs)
 
       timers.add(timerId)
-    }
-
-    initialFlights.forEach((flight) => {
-      scheduleFlightLifecycle(flight)
     })
 
     return () => {
       cancelled = true
       timers.forEach((timerId) => window.clearTimeout(timerId))
     }
-  }, [initialFlights, routeLookup, scene.routes])
+  }, [flights, routeLookup, scene.routes])
 
   return (
     <div id="bg-canvas" aria-hidden="true">
@@ -385,7 +383,9 @@ export default function BackgroundScene() {
             const route = routeLookup[flight.routeId]
             if (!route) return null
 
-            const launchSec = (flight.launchDelayMs / 1000).toFixed(2)
+            const launchSec = (
+              (flight.launchAtMs - timelineStartMs.current) / 1000
+            ).toFixed(2)
             const durationSec = (flight.durationMs / 1000).toFixed(2)
 
             return (

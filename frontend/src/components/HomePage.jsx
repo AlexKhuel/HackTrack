@@ -391,7 +391,6 @@ export default function HomePage({ onGetStarted }) {
 
             {/* CTA */}
             <section id="cta">
-                <div className="chip">Early Access</div>
                 <div className="cta-glow">
                     <h2>
                         Ready to hack <span>smarter</span>?
