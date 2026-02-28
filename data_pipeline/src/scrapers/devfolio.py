@@ -59,7 +59,7 @@ TIME_RE = re.compile(r"\b\d{1,2}:\d{2}\s*(?:[AaPp]\.?[Mm]\.?)?\b")
 ISOISH_SINGLE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}(?:[T ][0-9:.+\-Zz]+)?$")
 
 PRIZE_NUMBER_RE = re.compile(
-    r"(?P<symbol>[$€£₹¥])\s*(?P<number>\d{1,3}(?:,\d{3})*(?:\.\d+)?|\d+(?:\.\d+)?)"
+    r"(?P<symbol>[$€£₹¥])\s*(?P<number>\d{1,3}(?:,\d{2,3})*(?:\.\d+)?|\d+(?:\.\d+)?)"
     r"\s*(?P<suffix>[kKmM])?\+?"
 )
 

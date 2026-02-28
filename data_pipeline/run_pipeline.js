@@ -285,7 +285,7 @@ async function main(argv) {
         } else {
             const mlhOutput = path.join(outputDir, 'mlh_2026_events.json');
             const cmdArgs = [
-                path.join(SCRIPT_DIR, 'scrapers', 'mlh', 'scrape_mlh_2026.py'),
+                path.join(SCRIPT_DIR, 'src', 'scrapers', 'mlh.py'),
                 '--output',
                 mlhOutput,
             ];
@@ -308,7 +308,7 @@ async function main(argv) {
         } else {
             const devpostOutput = path.join(outputDir, 'devpost_hackathons.json');
             const cmdArgs = [
-                path.join(SCRIPT_DIR, 'scrapers', 'devpost', 'scrape_devpost.py'),
+                path.join(SCRIPT_DIR, 'src', 'scrapers', 'devpost.py'),
                 '--output',
                 devpostOutput,
                 '--statuses',
@@ -333,7 +333,7 @@ async function main(argv) {
         } else {
             const devfolioOutput = path.join(outputDir, 'devfolio_hackathons.json');
             const cmdArgs = [
-                path.join(SCRIPT_DIR, 'scrapers', 'devfolio', 'scrape_devfolio.py'),
+                path.join(SCRIPT_DIR, 'src', 'scrapers', 'devfolio.py'),
                 '--output',
                 devfolioOutput,
             ];
@@ -354,7 +354,7 @@ async function main(argv) {
     if (hasEventsSource) {
         log('Cleaning and loading events data...');
         const cleanCmdArgs = [
-            path.join(SCRIPT_DIR, 'formatters', 'events', 'clean_events.py'),
+            path.join(SCRIPT_DIR, 'src', 'formatters', 'events.py'),
             '--output',
             cleanedOutput,
             '--format',
@@ -367,7 +367,7 @@ async function main(argv) {
         await runCommand('python3', cleanCmdArgs, REPO_ROOT, commandOptions);
 
         const loadCmdArgs = [
-            path.join(SCRIPT_DIR, 'loaders', 'load_to_supabase.js'),
+            path.join(SCRIPT_DIR, 'src', 'loaders', 'events.js'),
             '--input',
             cleanedOutput,
             '--table',
@@ -408,7 +408,7 @@ async function main(argv) {
 
             log(`Formatting routes from flights input: ${flightsInput}`);
             const formatRoutesArgs = [
-                path.join(SCRIPT_DIR, 'formatters', 'flights', 'format_routes_from_flights.py'),
+                path.join(SCRIPT_DIR, 'src', 'formatters', 'flights.py'),
                 '--input', flightsInput,
                 '--output', routesOutput,
             ];
@@ -418,7 +418,7 @@ async function main(argv) {
         }
 
         const loadRoutesArgs = [
-            path.join(SCRIPT_DIR, 'loaders', 'load_routes.js'),
+            path.join(SCRIPT_DIR, 'src', 'loaders', 'routes.js'),
             '--input', routesInputPath,
             '--table', args.routesTable,
             '--batch-size', String(args.batchSize),
@@ -456,7 +456,7 @@ async function main(argv) {
 
             log(`Formatting lodging from input: ${hotelsInput}`);
             const formatLodgingArgs = [
-                path.join(SCRIPT_DIR, 'formatters', 'hotels', 'format_lodging_from_hotels.py'),
+                path.join(SCRIPT_DIR, 'src', 'formatters', 'hotels.py'),
                 '--input', hotelsInput,
                 '--output', lodgingOutput,
             ];
@@ -466,7 +466,7 @@ async function main(argv) {
         }
 
         const loadLodgingArgs = [
-            path.join(SCRIPT_DIR, 'loaders', 'load_lodging.js'),
+            path.join(SCRIPT_DIR, 'src', 'loaders', 'lodging.js'),
             '--input', lodgingInputPath,
             '--table', args.lodgingTable,
             '--batch-size', String(args.batchSize),

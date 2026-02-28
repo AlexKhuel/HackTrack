@@ -288,12 +288,13 @@ Committed datasets:
 - `data_pipeline/data/routes_weighted_post2020.json` (trimmed post-2020 routes for repo use)
 - `data_pipeline/data/lodging_formatted.json` (repo-ready lodging rates)
 
-## Deduplication behavior for events
+## Normalization and Deduplication behavior for events
 
-`clean_events.py` deduplicates in two stages:
+`clean_events.py` handles normalization and deduplication in these stages:
 
-1. Canonical URL key merge.
-2. Normalized `name + start_date` merge.
+1. **Currency Conversion:** Scraped `total_prize` strings with currencies (e.g. `₹500,000`, `CAD 5,000`) are converted to their approximate USD equivalent using internal static exchange rates.
+2. **Canonical URL Merge:** Records sharing the same canonical website URL are merged.
+3. **Name + Start Date Merge:** Records sharing the same normalized name and start date are merged.
 
 Merged records combine source provenance in `source` (example: `devfolio,devpost,mlh`).
 

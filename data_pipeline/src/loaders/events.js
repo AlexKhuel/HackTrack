@@ -6,7 +6,7 @@ const { Client } = require('pg');
 const dotenv = require('dotenv');
 
 const SCRIPT_DIR = __dirname;
-const REPO_ROOT = path.resolve(SCRIPT_DIR, '..');
+const REPO_ROOT = path.resolve(SCRIPT_DIR, '../../..');
 
 const SPACE_RE = /\s+/g;
 const NON_ALNUM_RE = /[^a-z0-9]+/g;
@@ -337,7 +337,7 @@ async function main() {
 
   log(
     `Load complete: inserted=${inserted}, skipped_existing=${skippedExisting}, ` +
-      `skipped_internal_duplicate=${skippedInternalDuplicate}, total_cleaned=${cleanedRows.length}`,
+    `skipped_internal_duplicate=${skippedInternalDuplicate}, total_cleaned=${cleanedRows.length}`,
   );
 }
 

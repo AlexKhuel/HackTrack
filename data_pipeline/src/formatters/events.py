@@ -51,8 +51,44 @@ DEFAULT_OUTPUT_FIELDS = [
 
 SPACE_RE = re.compile(r"\s+")
 NON_ALNUM_RE = re.compile(r"[^a-z0-9]+")
-NUMBER_RE = re.compile(r"(?<!\d)(\d{1,3}(?:,\d{3})+|\d+(?:\.\d+)?)([kKmM]?)(?!\d)")
+NUMBER_RE = re.compile(r"(?<!\d)(\d{1,3}(?:,\d{2,3})+|\d+(?:\.\d+)?)([kKmM]?)(?!\d)")
 ONLINE_RE = re.compile(r"\b(online|virtual|remote|worldwide|global)\b", re.IGNORECASE)
+
+# Currency detection patterns (mirrors scraper output formats).
+SYMBOL_AMOUNT_RE = re.compile(
+    r"(?P<symbol>[$€£₹¥])\s*"
+    r"(?P<number>\d{1,3}(?:,\d{2,3})*(?:\.\d+)?|\d+(?:\.\d+)?)"
+    r"\s*(?P<suffix>[kKmM])?"
+)
+CODE_AMOUNT_RE = re.compile(
+    r"(?P<number>\d{1,3}(?:,\d{2,3})*(?:\.\d+)?|\d+(?:\.\d+)?)"
+    r"\s*(?P<suffix>[kKmM])?\s*"
+    r"(?P<code>USD|CAD|EUR|GBP|INR|AUD|JPY|PKR|MXN|SGD)\b",
+    re.IGNORECASE,
+)
+
+SYMBOL_TO_CODE = {
+    "$": "USD",
+    "€": "EUR",
+    "£": "GBP",
+    "₹": "INR",
+    "¥": "JPY",
+}
+
+# Approximate static exchange rates to USD (updated Feb 2026).
+# These avoid an external API dependency; update periodically as needed.
+CURRENCY_TO_USD: dict[str, float] = {
+    "USD": 1.0,
+    "CAD": 0.72,
+    "EUR": 1.08,
+    "GBP": 1.27,
+    "INR": 0.012,
+    "AUD": 0.65,
+    "JPY": 0.0067,
+    "PKR": 0.0036,
+    "MXN": 0.058,
+    "SGD": 0.74,
+}
 
 COUNTRY_ALIASES = {
     "US": "United States",
@@ -285,6 +321,11 @@ def to_utc_timestamp(value: Any) -> str | None:
 
 
 def parse_prize_pool(value: Any) -> int | None:
+    """Extract the prize amount from a scraper total_prize string and convert to USD.
+
+    Supports symbol-prefixed (e.g. ₹500,000) and code-suffixed (e.g. CAD 5,000)
+    formats. Amounts without a recognized currency default to USD.
+    """
     if value is None:
         return None
     if isinstance(value, bool):
@@ -296,6 +337,39 @@ def parse_prize_pool(value: Any) -> int | None:
     if not text:
         return None
 
+    # Try to extract amounts with explicit currency info first.
+    currency_amounts: list[tuple[str, float]] = []
+
+    for match in SYMBOL_AMOUNT_RE.finditer(text):
+        symbol = match.group("symbol")
+        raw_number = float(match.group("number").replace(",", ""))
+        suffix = (match.group("suffix") or "").lower()
+        if suffix == "k":
+            raw_number *= 1_000
+        elif suffix == "m":
+            raw_number *= 1_000_000
+        code = SYMBOL_TO_CODE.get(symbol, "USD")
+        currency_amounts.append((code, raw_number))
+
+    for match in CODE_AMOUNT_RE.finditer(text):
+        raw_number = float(match.group("number").replace(",", ""))
+        suffix = (match.group("suffix") or "").lower()
+        if suffix == "k":
+            raw_number *= 1_000
+        elif suffix == "m":
+            raw_number *= 1_000_000
+        code = match.group("code").upper()
+        currency_amounts.append((code, raw_number))
+
+    if currency_amounts:
+        # Pick the largest amount (after USD conversion).
+        best_usd = max(
+            amount * CURRENCY_TO_USD.get(code, 1.0)
+            for code, amount in currency_amounts
+        )
+        return int(round(best_usd))
+
+    # Fallback: plain numbers without currency symbol (assume USD).
     amounts: list[float] = []
     for number, suffix in NUMBER_RE.findall(text):
         base = float(number.replace(",", ""))

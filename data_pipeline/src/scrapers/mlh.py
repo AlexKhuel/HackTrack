@@ -91,11 +91,11 @@ SYMBOL_TO_CODE = {
 
 SYMBOL_AMOUNT_RE = re.compile(
     r"(?P<symbol>[$€£₹¥])\s*"
-    r"(?P<number>\d{1,3}(?:,\d{3})*(?:\.\d+)?|\d+(?:\.\d+)?)"
+    r"(?P<number>\d{1,3}(?:,\d{2,3})*(?:\.\d+)?|\d+(?:\.\d+)?)"
     r"\s*(?P<suffix>[kKmM])?"
 )
 CODE_AMOUNT_RE = re.compile(
-    r"(?P<number>\d{1,3}(?:,\d{3})*(?:\.\d+)?|\d+(?:\.\d+)?)"
+    r"(?P<number>\d{1,3}(?:,\d{2,3})*(?:\.\d+)?|\d+(?:\.\d+)?)"
     r"\s*(?P<suffix>[kKmM])?\s*"
     r"(?P<code>USD|CAD|EUR|GBP|INR|AUD|JPY|PKR|MXN|SGD)\b",
     re.IGNORECASE,

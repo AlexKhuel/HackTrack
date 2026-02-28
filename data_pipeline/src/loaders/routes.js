@@ -6,7 +6,7 @@ const { Client } = require('pg');
 const dotenv = require('dotenv');
 
 const SCRIPT_DIR = __dirname;
-const REPO_ROOT = path.resolve(SCRIPT_DIR, '..');
+const REPO_ROOT = path.resolve(SCRIPT_DIR, '../../..');
 
 function timestamp() {
   return new Date().toISOString();
@@ -106,6 +106,11 @@ function prepareInsertRows(cleanedRows) {
     const avgOutboundDuration = row.avg_outbound_duration_minutes ?? null;
     const avgReturnDuration = row.avg_return_duration_minutes ?? null;
 
+    // Extract just the departure_scheduled timestamps for the Supabase array column
+    const departureTimes = row.scheduled_flights
+      ? row.scheduled_flights.map(f => f.departure_scheduled).filter(Boolean)
+      : [];
+
     if (id === null || origin === null || destination === null) {
       continue;
     }
@@ -118,6 +123,7 @@ function prepareInsertRows(cleanedRows) {
       avgReturnPrice,
       avgOutboundDuration,
       avgReturnDuration,
+      departureTimes,
     ]);
   }
 
@@ -136,6 +142,7 @@ async function insertBatch(client, table, rows) {
     'avg_return_price',
     'avg_outbound_duration_minutes',
     'avg_return_duration_minutes',
+    'departure_times',
   ];
 
   const values = [];
@@ -160,7 +167,8 @@ async function insertBatch(client, table, rows) {
       avg_outbound_price,
       avg_return_price,
       avg_outbound_duration_minutes,
-      avg_return_duration_minutes
+      avg_return_duration_minutes,
+      departure_times
     ) VALUES ${placeholders.join(', ')}
     ON CONFLICT (id) DO UPDATE SET
       origin_airport = EXCLUDED.origin_airport,
@@ -168,7 +176,8 @@ async function insertBatch(client, table, rows) {
       avg_outbound_price = EXCLUDED.avg_outbound_price,
       avg_return_price = EXCLUDED.avg_return_price,
       avg_outbound_duration_minutes = EXCLUDED.avg_outbound_duration_minutes,
-      avg_return_duration_minutes = EXCLUDED.avg_return_duration_minutes
+      avg_return_duration_minutes = EXCLUDED.avg_return_duration_minutes,
+      departure_times = EXCLUDED.departure_times
   `;
 
   await client.query(sql, values);

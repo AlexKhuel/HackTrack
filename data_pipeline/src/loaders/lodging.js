@@ -6,7 +6,7 @@ const { Client } = require('pg');
 const dotenv = require('dotenv');
 
 const SCRIPT_DIR = __dirname;
-const REPO_ROOT = path.resolve(SCRIPT_DIR, '..');
+const REPO_ROOT = path.resolve(SCRIPT_DIR, '../../..');
 
 function timestamp() {
   return new Date().toISOString();
