@@ -5,7 +5,8 @@ Target schema:
   id bigint not null,
   origin_airport text,
   destination_airport text,
-  city text,
+  origin_city text,
+  destination_city text,
   avg_outbound_price real,
   avg_return_price real,
   avg_outbound_duration_minutes smallint,
@@ -92,7 +93,8 @@ OUTPUT_FIELDS = [
     "id",
     "origin_airport",
     "destination_airport",
-    "city",
+    "origin_city",
+    "destination_city",
     "avg_outbound_price",
     "avg_return_price",
     "avg_outbound_duration_minutes",
@@ -377,7 +379,8 @@ def format_for_routes(
                 "id": 0,
                 "origin_airport": origin,
                 "destination_airport": destination,
-                "city": airport_to_city.get(origin),
+                "origin_city": airport_to_city.get(origin),
+                "destination_city": airport_to_city.get(destination),
                 "avg_outbound_price": outbound.avg_price(),
                 "avg_return_price": inbound.avg_price(),
                 "avg_outbound_duration_minutes": outbound.avg_duration(),
@@ -422,7 +425,7 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
         "--airport-city-map",
         default=None,
         help=(
-            "Optional JSON mapping for city field. "
+            "Optional JSON mapping for origin_city/destination_city derivation. "
             "Accepts {\"LAX\":\"Los Angeles\"} or [{\"airport_code\":\"LAX\",\"city\":\"Los Angeles\"}]."
             " Defaults to data_pipeline/data/airport_city_map.json when present."
         ),

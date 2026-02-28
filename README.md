@@ -57,8 +57,8 @@ create table events (
   name               text,
   city               text,
   country            text,
-  start_datetime_utc text,
-  end_datetime_utc   text,
+  start_datetime_utc timestamp without time zone,
+  end_datetime_utc   timestamp without time zone,
   in_person          boolean,
   prize_pool         integer,
   url                text
@@ -68,11 +68,13 @@ create table routes (
   id                            bigint primary key,
   origin_airport                text,
   destination_airport           text,
-  city                          text,
+  origin_city                   text,
+  destination_city              text,
   avg_outbound_price            real,
   avg_return_price              real,
   avg_outbound_duration_minutes smallint,
-  avg_return_duration_minutes   smallint
+  avg_return_duration_minutes   smallint,
+  departure_times               text[]
 );
 
 create table lodging (
@@ -103,7 +105,7 @@ Returns feasible hackathons for a given user context.
 
 ### `POST /api/admin/sync-events`
 
-Triggers a background re-scrape of MLH, Devpost, and Devfolio. Requires `Authorization` header. Returns `202 Accepted` immediately.
+Triggers the full background pipeline (events + routes + lodging) via `data_pipeline/run_pipeline.js --include-all`. Requires `Authorization` header. Returns `202 Accepted` immediately.
 
 ### `GET /health`
 
@@ -115,7 +117,7 @@ Returns `{ "status": "ok" }`.
 
 **Time** — for each event, the app works backwards from the event start and end times to find the latest possible Friday departure and earliest possible Monday return. Both must fit within the user's class schedule. All timezone math is done in UTC via Luxon; DST-safe.
 
-**Budget** — maps the event city to an airport, looks up the route's average outbound + return prices, and adds a 2-night lodging estimate by city cost band (high/medium/low). The total must be within the user's budget.
+**Budget** — maps the event city to an airport, looks up route average outbound + return prices, and uses `lodging.nightly_rate` when available (falling back to a flat `$90/night` estimate when missing). The total must be within the user's budget.
 
 ---
 

@@ -16,23 +16,22 @@ The orchestrator for all flows is `data_pipeline/run_pipeline.js`.
 
 1. Scrapers produce raw event JSON/CSV with shared fields:
 `name`, `city`, `start_datetime`, `end_datetime`, `total_prize`, `website`.
-2. Event formatter (`formatters/events/clean_events.py`) normalizes time/location/prize data and deduplicates records.
+2. Event formatter (`src/formatters/events.py`) normalizes time/location/prize data and deduplicates records.
 3. JS loaders insert or upsert into Postgres tables.
 4. Backend admin route (`POST /api/admin/sync-events`) runs the orchestrator asynchronously.
 
 ## Repository layout
 
 - `data_pipeline/run_pipeline.js`: orchestration entrypoint.
-- `data_pipeline/scrapers/mlh/scrape_mlh_2026.py`: MLH scraper.
-- `data_pipeline/scrapers/devpost/scrape_devpost.py`: Devpost scraper.
-- `data_pipeline/scrapers/devfolio/scrape_devfolio.py`: Devfolio scraper.
-- `data_pipeline/formatters/events/clean_events.py`: event normalization + merge + dedupe.
-- `data_pipeline/formatters/flights/format_routes_from_flights.py`: flights CSV to routes dataset.
-- `data_pipeline/formatters/flights/format_routes_from_us_fares.py`: DOT fares CSV to recency-weighted routes dataset (post-2020).
-- `data_pipeline/formatters/hotels/format_lodging_from_hotels.py`: hotel prices CSV to lodging dataset.
-- `data_pipeline/loaders/load_to_supabase.js`: events loader.
-- `data_pipeline/loaders/load_routes.js`: routes loader.
-- `data_pipeline/loaders/load_lodging.js`: lodging loader.
+- `data_pipeline/src/scrapers/mlh.py`: MLH scraper.
+- `data_pipeline/src/scrapers/devpost.py`: Devpost scraper.
+- `data_pipeline/src/scrapers/devfolio.py`: Devfolio scraper.
+- `data_pipeline/src/formatters/events.py`: event normalization + merge + dedupe.
+- `data_pipeline/src/formatters/flights.py`: flights CSV to routes dataset.
+- `data_pipeline/src/formatters/hotels.py`: hotel prices CSV to lodging dataset.
+- `data_pipeline/src/loaders/events.js`: events loader.
+- `data_pipeline/src/loaders/routes.js`: routes loader.
+- `data_pipeline/src/loaders/lodging.js`: lodging loader.
 - `data_pipeline/data/routes_weighted_post2020.json`: commit-friendly trimmed routes dataset.
 - `data_pipeline/data/airport_city_map.json`: airport code → city mapping used by routes formatter/loader.
 - `data_pipeline/data/lodging_formatted.json`: commit-friendly US city lodging rates.
@@ -138,7 +137,7 @@ node data_pipeline/run_pipeline.js --include-all
 Load the committed weighted routes dataset only (no re-formatting step):
 
 ```bash
-node data_pipeline/loaders/load_routes.js \
+node data_pipeline/src/loaders/routes.js \
   --input data_pipeline/data/routes_weighted_post2020.json \
   --table routes \
   --replace-existing
@@ -147,7 +146,7 @@ node data_pipeline/loaders/load_routes.js \
 Load the committed lodging dataset only:
 
 ```bash
-node data_pipeline/loaders/load_lodging.js \
+node data_pipeline/src/loaders/lodging.js \
   --input data_pipeline/data/lodging_formatted.json \
   --table lodging \
   --replace-existing
@@ -190,7 +189,7 @@ node data_pipeline/loaders/load_lodging.js \
 - `--routes-input <path>`: preformatted routes JSON to load directly.
 - `--flights-input <path>`: raw flights CSV (required only when `--routes-input` is not provided).
 - `--routes-table <name>`: target routes table (default `routes` or `ROUTES_TABLE`).
-- Flight formatter output includes both airport codes and a derived origin `city` field so routes can be joined with city-keyed lodging data.
+- Flight formatter output includes both airport codes and derived `origin_city` + `destination_city` fields so routes can be joined with city-keyed lodging data.
 - Default airport→city mapping source: `data_pipeline/data/airport_city_map.json` (override in formatter with `--airport-city-map`).
 
 ### Hotels flags
@@ -210,25 +209,25 @@ node data_pipeline/loaders/load_lodging.js \
 MLH:
 
 ```bash
-python3 data_pipeline/scrapers/mlh/scrape_mlh_2026.py --output data_pipeline/output/mlh_2026_events.json
+python3 data_pipeline/src/scrapers/mlh.py --output data_pipeline/output/mlh_2026_events.json
 ```
 
 Devpost:
 
 ```bash
-python3 data_pipeline/scrapers/devpost/scrape_devpost.py --output data_pipeline/output/devpost_hackathons.json
+python3 data_pipeline/src/scrapers/devpost.py --output data_pipeline/output/devpost_hackathons.json
 ```
 
 Devfolio:
 
 ```bash
-python3 data_pipeline/scrapers/devfolio/scrape_devfolio.py --output data_pipeline/output/devfolio_hackathons.json
+python3 data_pipeline/src/scrapers/devfolio.py --output data_pipeline/output/devfolio_hackathons.json
 ```
 
 ### Event cleaner
 
 ```bash
-python3 data_pipeline/formatters/events/clean_events.py \
+python3 data_pipeline/src/formatters/events.py \
   --mlh data_pipeline/output/mlh_2026_events.json \
   --devpost data_pipeline/output/devpost_hackathons.json \
   --devfolio data_pipeline/output/devfolio_hackathons.json \
@@ -241,7 +240,7 @@ python3 data_pipeline/formatters/events/clean_events.py \
 Events:
 
 ```bash
-node data_pipeline/loaders/load_to_supabase.js \
+node data_pipeline/src/loaders/events.js \
   --input data_pipeline/output/cleaned_events.json \
   --table events
 ```
@@ -249,21 +248,20 @@ node data_pipeline/loaders/load_to_supabase.js \
 Routes:
 
 ```bash
-node data_pipeline/loaders/load_routes.js \
+node data_pipeline/src/loaders/routes.js \
   --input data_pipeline/output/routes_formatted.json \
   --table routes
 ```
 
-Routes from DOT fares dataset (post-2020, recency-weighted):
+Routes from raw flights CSV:
 
 ```bash
-python3 data_pipeline/formatters/flights/format_routes_from_us_fares.py \
-  --input "/Users/joshuadowd/Downloads/US Airline Flight Routes and Fares 1993-2024.csv" \
+python3 data_pipeline/src/formatters/flights.py \
+  --input /path/to/flights.csv \
   --output data_pipeline/output/routes_weighted_post2020.json \
-  --min-year 2021 \
-  --half-life-quarters 8
+  --format json
 
-node data_pipeline/loaders/load_routes.js \
+node data_pipeline/src/loaders/routes.js \
   --input data_pipeline/output/routes_weighted_post2020.json \
   --table routes
 ```
@@ -281,7 +279,7 @@ python3 data_pipeline/src/formatters/hotels.py \
   --output data_pipeline/output/lodging_formatted.json \
   --airport-city-map /path/to/airport_city_map.json
 
-node data_pipeline/loaders/load_lodging.js \
+node data_pipeline/src/loaders/lodging.js \
   --input data_pipeline/output/lodging_formatted.json \
   --table lodging
 ```
@@ -306,7 +304,7 @@ Committed datasets:
 
 ## Normalization and Deduplication behavior for events
 
-`clean_events.py` handles normalization and deduplication in these stages:
+`events.py` handles normalization and deduplication in these stages:
 
 1. **Currency Conversion:** Scraped `total_prize` strings with currencies (e.g. `₹500,000`, `CAD 5,000`) are converted to their approximate USD equivalent using internal static exchange rates.
 2. **Canonical URL Merge:** Records sharing the same canonical website URL are merged.
@@ -331,7 +329,7 @@ GitHub Actions schedule is defined in `.github/workflows/data_pipeline_sync.yml`
 
 ## Extending the events pipeline with a new source
 
-1. Add scraper under `data_pipeline/scrapers/<source>/` emitting the standard event field set.
-2. Add `--<source>` handling in `formatters/events/clean_events.py` and include source in `load_normalized_records`.
+1. Add scraper under `data_pipeline/src/scrapers/<source>.py` emitting the standard event field set.
+2. Add `--<source>` handling in `data_pipeline/src/formatters/events.py` and include source in `load_normalized_records`.
 3. Add `--<source>-input` and `--skip-<source>` in `run_pipeline.js`, plus scraper execution block and cleaner wiring.
 4. Update this README and any root-level docs that describe active event sources.

@@ -90,16 +90,93 @@ const NORMALIZED_CITY_TO_AIRPORT = Object.freeze(
   }, {})
 );
 
-// City cost bands for lodging heuristic (2 nights: Fri + Sat)
-const LODGING_NIGHTLY = {
-  high:   150,  // SF, NYC, Boston, Seattle, DC
-  medium: 100,  // Chicago, Austin, LA, Miami, Denver
-  low:     70,  // everywhere else
-};
+// Fallback lodging heuristic used only when no city rate is available in lodging table.
+const DEFAULT_LODGING_NIGHTLY = 90;
 const LODGING_NIGHTS = 2;
 
-const HIGH_COST_AIRPORTS   = new Set(['SFO', 'SJC', 'OAK', 'JFK', 'EWR', 'BOS', 'SEA', 'DCA']);
-const MEDIUM_COST_AIRPORTS = new Set(['ORD', 'AUS', 'LAX', 'MIA', 'DEN', 'ATL', 'PHL', 'MSP']);
+const AIRPORT_TO_CITY = Object.freeze({
+  ATL: 'Atlanta',
+  AUS: 'Austin',
+  BNA: 'Nashville',
+  BOS: 'Boston',
+  BWI: 'Baltimore',
+  CLE: 'Cleveland',
+  CLT: 'Charlotte',
+  CMH: 'Columbus',
+  CMI: 'Champaign',
+  DCA: 'Washington',
+  DEN: 'Denver',
+  DFW: 'Dallas',
+  DTW: 'Detroit',
+  EWR: 'Newark',
+  GNV: 'Gainesville',
+  IAH: 'Houston',
+  ITH: 'Ithaca',
+  JFK: 'New York',
+  LAS: 'Las Vegas',
+  LAX: 'Los Angeles',
+  MCI: 'Kansas City',
+  MCO: 'Orlando',
+  MIA: 'Miami',
+  MSP: 'Minneapolis',
+  OAK: 'Oakland',
+  ORD: 'Chicago',
+  PDX: 'Portland',
+  PHL: 'Philadelphia',
+  PHX: 'Phoenix',
+  PIT: 'Pittsburgh',
+  RDU: 'Raleigh',
+  SAN: 'San Diego',
+  SAT: 'San Antonio',
+  SEA: 'Seattle',
+  SFO: 'San Francisco',
+  SJC: 'San Jose',
+  SLC: 'Salt Lake City',
+  SNA: 'Irvine',
+  STL: 'St. Louis',
+});
+
+const AIRPORT_TO_TIMEZONE = Object.freeze({
+  ATL: 'America/New_York',
+  AUS: 'America/Chicago',
+  BNA: 'America/Chicago',
+  BOS: 'America/New_York',
+  BWI: 'America/New_York',
+  CLE: 'America/New_York',
+  CLT: 'America/New_York',
+  CMH: 'America/New_York',
+  CMI: 'America/Chicago',
+  DCA: 'America/New_York',
+  DEN: 'America/Denver',
+  DFW: 'America/Chicago',
+  DTW: 'America/New_York',
+  EWR: 'America/New_York',
+  GNV: 'America/New_York',
+  IAH: 'America/Chicago',
+  ITH: 'America/New_York',
+  JFK: 'America/New_York',
+  LAS: 'America/Los_Angeles',
+  LAX: 'America/Los_Angeles',
+  MCI: 'America/Chicago',
+  MCO: 'America/New_York',
+  MIA: 'America/New_York',
+  MSP: 'America/Chicago',
+  OAK: 'America/Los_Angeles',
+  ORD: 'America/Chicago',
+  PDX: 'America/Los_Angeles',
+  PHL: 'America/New_York',
+  PHX: 'America/Phoenix',
+  PIT: 'America/New_York',
+  RDU: 'America/New_York',
+  SAN: 'America/Los_Angeles',
+  SAT: 'America/Chicago',
+  SEA: 'America/Los_Angeles',
+  SFO: 'America/Los_Angeles',
+  SJC: 'America/Los_Angeles',
+  SLC: 'America/Denver',
+  SNA: 'America/Los_Angeles',
+  STL: 'America/Chicago',
+});
 
 /**
  * Resolve an event city string to an IATA airport code.
@@ -131,15 +208,26 @@ function resolveAirport(city) {
 
 /**
  * Estimate lodging cost for a weekend trip (2 nights).
- * Based on destination airport cost band.
+ * Uses DB-provided nightly rate when present; otherwise applies a flat fallback.
  *
- * @param {string} destAirport  IATA code
+ * @param {string} _destAirport  IATA code (unused)
  * @returns {number} Estimated lodging cost in USD
  */
-function estimateLodging(destAirport) {
-  if (HIGH_COST_AIRPORTS.has(destAirport))   return LODGING_NIGHTLY.high   * LODGING_NIGHTS;
-  if (MEDIUM_COST_AIRPORTS.has(destAirport)) return LODGING_NIGHTLY.medium * LODGING_NIGHTS;
-  return LODGING_NIGHTLY.low * LODGING_NIGHTS;
+function estimateLodging(_destAirport, nightlyRate) {
+  if (Number.isFinite(nightlyRate) && nightlyRate >= 0) {
+    return Math.round(nightlyRate * LODGING_NIGHTS * 100) / 100;
+  }
+  return DEFAULT_LODGING_NIGHTLY * LODGING_NIGHTS;
+}
+
+function resolveAirportCity(airportCode) {
+  if (!airportCode) return null;
+  return AIRPORT_TO_CITY[String(airportCode).toUpperCase()] ?? null;
+}
+
+function resolveAirportTimezone(airportCode) {
+  if (!airportCode) return null;
+  return AIRPORT_TO_TIMEZONE[String(airportCode).toUpperCase()] ?? null;
 }
 
 /**
@@ -166,7 +254,7 @@ function estimateLodging(destAirport) {
  * }}
  */
 function checkBudgetFeasibility(event, userParams, route) {
-  const { budget, include_lodging = true } = userParams;
+  const { budget, include_lodging = true, lodging_nightly_rate = null } = userParams;
 
   const destAirport = resolveAirport(event.city);
 
@@ -192,8 +280,22 @@ function checkBudgetFeasibility(event, userParams, route) {
     };
   }
 
-  const flightCost  = route.avg_outbound_price + route.avg_return_price;
-  const lodgingCost = include_lodging ? estimateLodging(destAirport) : 0;
+  const outboundPrice = Number(route.avg_outbound_price);
+  const returnPrice = Number(route.avg_return_price);
+  if (!Number.isFinite(outboundPrice) || !Number.isFinite(returnPrice) || outboundPrice < 0 || returnPrice < 0) {
+    return {
+      feasible:               false,
+      reason:                 `Invalid route pricing data for ${destAirport}`,
+      destination_airport:    destAirport,
+      estimated_flight_cost:  null,
+      estimated_lodging_cost: null,
+      estimated_total_cost:   null,
+    };
+  }
+
+  const flightCost  = Math.round((outboundPrice + returnPrice) * 100) / 100;
+  const nightlyRate = lodging_nightly_rate == null ? null : Number(lodging_nightly_rate);
+  const lodgingCost = include_lodging ? estimateLodging(destAirport, nightlyRate) : 0;
   const totalCost   = flightCost + lodgingCost;
 
   const feasible = totalCost <= budget;
@@ -208,4 +310,13 @@ function checkBudgetFeasibility(event, userParams, route) {
   };
 }
 
-module.exports = { checkBudgetFeasibility, resolveAirport, estimateLodging, CITY_TO_AIRPORT };
+module.exports = {
+  checkBudgetFeasibility,
+  resolveAirport,
+  resolveAirportCity,
+  resolveAirportTimezone,
+  estimateLodging,
+  normalizeCityToken,
+  CITY_TO_AIRPORT,
+  AIRPORT_TO_CITY,
+};

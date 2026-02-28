@@ -200,12 +200,20 @@ function normalizeCity(raw) {
   return token || null;
 }
 
-function resolveRouteCity(row) {
-  const explicitCity = normalizeCity(row.city);
+function resolveOriginCity(row) {
+  const explicitCity = normalizeCity(row.origin_city);
   if (explicitCity) return explicitCity;
   const originAirport = normalizeAirportCode(row.origin_airport);
   if (!originAirport) return null;
   return AIRPORT_TO_CITY[originAirport] ?? null;
+}
+
+function resolveDestinationCity(row) {
+  const explicitCity = normalizeCity(row.destination_city);
+  if (explicitCity) return explicitCity;
+  const destinationAirport = normalizeAirportCode(row.destination_airport);
+  if (!destinationAirport) return null;
+  return AIRPORT_TO_CITY[destinationAirport] ?? null;
 }
 
 function prepareInsertRows(cleanedRows) {
@@ -219,12 +227,10 @@ function prepareInsertRows(cleanedRows) {
     const avgReturnPrice = row.avg_return_price ?? null;
     const avgOutboundDuration = row.avg_outbound_duration_minutes ?? null;
     const avgReturnDuration = row.avg_return_duration_minutes ?? null;
-    const city = resolveRouteCity(row);
+    const originCity = resolveOriginCity(row);
+    const destinationCity = resolveDestinationCity(row);
 
-    // Extract just the departure_scheduled timestamps for the Supabase array column
-    const departureTimes = row.scheduled_flights
-      ? row.scheduled_flights.map(f => f.departure_scheduled).filter(Boolean)
-      : [];
+    const departureTimes = [];
 
     if (id === null || origin === null || destination === null) {
       continue;
@@ -239,7 +245,8 @@ function prepareInsertRows(cleanedRows) {
       avgOutboundDuration,
       avgReturnDuration,
       departureTimes,
-      city,
+      originCity,
+      destinationCity,
     ]);
   }
 
@@ -259,7 +266,8 @@ async function insertBatch(client, table, rows) {
     'avg_outbound_duration_minutes',
     'avg_return_duration_minutes',
     'departure_times',
-    'city',
+    'origin_city',
+    'destination_city',
   ];
 
   const values = [];
@@ -286,7 +294,8 @@ async function insertBatch(client, table, rows) {
       avg_outbound_duration_minutes,
       avg_return_duration_minutes,
       departure_times,
-      city
+      origin_city,
+      destination_city
     ) VALUES ${placeholders.join(', ')}
     ON CONFLICT (id) DO UPDATE SET
       origin_airport = EXCLUDED.origin_airport,
@@ -296,7 +305,8 @@ async function insertBatch(client, table, rows) {
       avg_outbound_duration_minutes = EXCLUDED.avg_outbound_duration_minutes,
       avg_return_duration_minutes = EXCLUDED.avg_return_duration_minutes,
       departure_times = EXCLUDED.departure_times,
-      city = EXCLUDED.city
+      origin_city = EXCLUDED.origin_city,
+      destination_city = EXCLUDED.destination_city
   `;
 
   await client.query(sql, values);

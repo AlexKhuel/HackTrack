@@ -63,6 +63,20 @@ function buildLocalDateTime(dateDT, hhmm, ianaTimezone) {
 }
 
 /**
+ * Parse a UTC datetime from either ISO or SQL timestamp-like strings.
+ *
+ * @param {string} value
+ * @param {string} fieldName
+ * @returns {DateTime}
+ */
+function parseUtcDateTime(value, fieldName) {
+  const asISO = DateTime.fromISO(value, { zone: 'utc' });
+  if (asISO.isValid) return asISO;
+
+  throw new Error(`Invalid ${fieldName}: "${value}"`);
+}
+
+/**
  * Determine whether a student can feasibly attend a hackathon given their class schedule
  * and the estimated flight duration to the event city.
  *
@@ -106,14 +120,14 @@ function checkTimeFeasibility(event, userParams) {
 
   const event_timezone = rawEventTz || 'UTC';
 
-  const eventStartUTC = DateTime.fromISO(start_datetime_utc, { zone: 'utc' });
-  const eventEndUTC   = DateTime.fromISO(end_datetime_utc,   { zone: 'utc' });
+  const eventStartUTC = parseUtcDateTime(start_datetime_utc, 'start_datetime_utc');
+  const eventEndUTC   = parseUtcDateTime(end_datetime_utc, 'end_datetime_utc');
 
-  if (!eventStartUTC.isValid) {
-    throw new Error(`Invalid start_datetime_utc: "${start_datetime_utc}"`);
+  if (!Number.isFinite(avg_outbound_duration_minutes) || avg_outbound_duration_minutes < 0) {
+    throw new Error(`Invalid avg_outbound_duration_minutes: "${avg_outbound_duration_minutes}"`);
   }
-  if (!eventEndUTC.isValid) {
-    throw new Error(`Invalid end_datetime_utc: "${end_datetime_utc}"`);
+  if (!Number.isFinite(avg_return_duration_minutes) || avg_return_duration_minutes < 0) {
+    throw new Error(`Invalid avg_return_duration_minutes: "${avg_return_duration_minutes}"`);
   }
 
   // --- Compute the two travel boundary timestamps ---

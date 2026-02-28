@@ -1275,7 +1275,7 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
 def main(argv: list[str]) -> int:
     args = parse_args(argv)
     output_path = Path(args.output).expanduser().resolve()
-    log(f"Starting clean_events.py (output={output_path})")
+    log(f"Starting events.py formatter (output={output_path})")
 
     enable_online_city_lookup = not args.disable_online_city_lookup
     city_lookup_cache_path = Path(args.city_lookup_cache).expanduser().resolve()
