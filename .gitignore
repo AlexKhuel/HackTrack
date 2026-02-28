@@ -22,6 +22,7 @@ __pycache__/
 *.csv
 !data_pipeline/package.json
 !data_pipeline/package-lock.json
+!data_pipeline/data/routes_weighted_post2020.json
 !backend/package.json
 !backend/package-lock.json
 

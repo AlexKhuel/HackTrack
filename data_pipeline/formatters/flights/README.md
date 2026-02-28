@@ -1,6 +1,6 @@
-# Flights Routes Formatter
+# Flights Routes Formatters
 
-Formats a raw flights CSV into rows for:
+These scripts format flight datasets into rows for:
 
 - `id`
 - `origin_airport`
@@ -27,15 +27,36 @@ create table public.routes (
 
 ## Usage
 
+### 1) From departure/arrival timestamps dataset (`flights.csv`)
+
 ```bash
-python3 Flights-Routes/format_routes_from_flights.py \
+python3 data_pipeline/formatters/flights/format_routes_from_flights.py \
   --input /Users/joshuadowd/Downloads/flights.csv \
   --output /Users/joshuadowd/Downloads/routes_formatted.csv
 ```
 
+### 2) From DOT fares dataset (`US Airline Flight Routes and Fares 1993-2024.csv`)
+
+```bash
+python3 data_pipeline/formatters/flights/format_routes_from_us_fares.py \
+  --input "/Users/joshuadowd/Downloads/US Airline Flight Routes and Fares 1993-2024.csv" \
+  --output /Users/joshuadowd/Downloads/routes_weighted_post2020.json \
+  --min-year 2021 \
+  --half-life-quarters 8
+```
+
+Committed trimmed dataset path in this repo:
+
+`data_pipeline/data/routes_weighted_post2020.json`
+
 ## Notes
 
-- Durations are computed after converting local departure/arrival timestamps to UTC.
-- Default route direction is first-seen per airport pair.
-- Use `--orientation lex` to force alphabetical direction.
-- Use `--airport-tz CODE=Area/City` to override airport timezone mapping.
+- `format_routes_from_flights.py`:
+  - Durations are computed after converting local departure/arrival timestamps to UTC.
+  - Use `--airport-tz CODE=Area/City` to override airport timezone mapping.
+- `format_routes_from_us_fares.py`:
+  - Keeps recent rows only (`--min-year`, default `2021`, i.e. post-2020).
+  - Uses recency-weighted prices (newer quarters have higher impact).
+  - Also weights by passengers by default (`--passenger-weight-power 1.0`).
+  - Estimates duration from miles (`nsmiles`) using configurable speed/overhead.
+- Both scripts default to one row per airport pair and support `--orientation lex`.
