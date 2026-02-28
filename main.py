@@ -1,6 +1,7 @@
 from fastapi import FastAPI
 from sqlalchemy import create_engine, text
 import os
+import pandas as pd
 
 app = FastAPI()
 
@@ -10,6 +11,11 @@ if not DATABASE_URL:
     raise ValueError("DATABASE_URL is not set")
 
 engine = create_engine(DATABASE_URL)
+
+def load_events():
+    with engine.connect() as conn:
+        result = conn.execute(text("SELECT * FROM events"))
+        return pd.DataFrame(result.fetchall(), columns=result.keys())
 
 @app.get("/health")
 def health():
@@ -23,12 +29,10 @@ def health_db():
     except Exception as e:
         return {"db": str(e)}
 @app.get("/debug-env")
+
 def debug_env():
     return {"database_url_set": bool(os.getenv("DATABASE_URL"))}
 @app.get("/events")
 def get_events():
-    with engine.connect() as conn:
-        result = conn.execute(text("SELECT * FROM events"))
-        rows = result.fetchall()
-
-    return [dict(row._mapping) for row in rows]
+    df = load_events()
+    return df.to_dict(orient="records")
