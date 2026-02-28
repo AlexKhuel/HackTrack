@@ -290,4 +290,16 @@ describe('checkTimeFeasibility', () => {
 
     expect(() => checkTimeFeasibility(event, user)).toThrow('Invalid start_datetime_utc');
   });
+
+  // CASE 13: Invalid flight durations throw descriptive errors
+  test('invalid flight duration values throw descriptive errors', () => {
+    const event = makeEvent({
+      startUTC: '2026-03-07T18:00:00.000Z',
+      endUTC: '2026-03-09T02:00:00.000Z',
+      timezone: 'UTC',
+    });
+    const user = makeUser({ outboundMinutes: Number.NaN, returnMinutes: 120 });
+
+    expect(() => checkTimeFeasibility(event, user)).toThrow('Invalid avg_outbound_duration_minutes');
+  });
 });
