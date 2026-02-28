@@ -2,15 +2,26 @@
 .venv/
 venv/
 
+# Node artifacts
+node_modules/
+Supabase-Pipeline/node_modules/
+
 # Python cache/artifacts
 __pycache__/
 *.py[cod]
 *.pyo
 *.pyd
 
+# Environment files
+.env
+.env.*
+!.env.example
+
 # Local outputs
 *.json
 *.csv
+!Supabase-Pipeline/package.json
+!Supabase-Pipeline/package-lock.json
 
 # macOS
 .DS_Store
