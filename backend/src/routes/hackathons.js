@@ -123,6 +123,24 @@ function normalizeDateFilter(value, boundary) {
   return parsed.toUTC().toISO();
 }
 
+function normalizeScheduleBoundary(value, fieldName) {
+  const text = String(value ?? '').trim().replace(' ', 'T');
+  if (!DATE_TIME_WITH_TZ_RE.test(text)) {
+    throw new Error(
+      `Invalid ${fieldName} value: use an ISO 8601 datetime with explicit timezone (e.g. 2026-03-06T18:00:00-08:00)`
+    );
+  }
+
+  const parsed = DateTime.fromISO(text, { setZone: true });
+  if (!parsed.isValid) throw new Error(`Invalid ${fieldName} value`);
+  return parsed;
+}
+
+function ensureValidTimezone(timezone) {
+  const probe = DateTime.now().setZone(String(timezone ?? ''));
+  if (!probe.isValid) throw new Error('user_timezone must be a valid IANA timezone');
+}
+
 function normalizeEventUtcDateTime(value) {
   if (value == null || value === '') return null;
   const parsed = DateTime.fromISO(String(value), { zone: 'utc' });
@@ -257,8 +275,8 @@ function hasFriendInDestinationCity(eventCity, routeDestinationCity, destAirport
  *
  * Required query params:
  *   origin_airport             - 1-3 IATA codes, supports repeated params or delimited string
- *   friday_last_class_end      - "HH:MM" in user's local timezone
- *   monday_first_class_start   - "HH:MM" in user's local timezone
+ *   friday_last_class_end      - ISO 8601 datetime with explicit timezone
+ *   monday_first_class_start   - ISO 8601 datetime with explicit timezone
  *   user_timezone              - IANA string, e.g. "America/New_York"
  *   budget                     - number (total all-in USD budget)
  *
@@ -306,6 +324,18 @@ router.get('/feasible', async (req, res) => {
 
   if (isNaN(budgetNum) || budgetNum <= 0) {
     return res.status(400).json({ error: 'budget must be a positive number' });
+  }
+
+  let fridayLastClassEndHHMM;
+  let mondayFirstClassStartHHMM;
+  try {
+    ensureValidTimezone(user_timezone);
+    const fridayLastClassBoundary = normalizeScheduleBoundary(friday_last_class_end, 'friday_last_class_end');
+    const mondayFirstClassBoundary = normalizeScheduleBoundary(monday_first_class_start, 'monday_first_class_start');
+    fridayLastClassEndHHMM = fridayLastClassBoundary.setZone(user_timezone).toFormat('HH:mm');
+    mondayFirstClassStartHHMM = mondayFirstClassBoundary.setZone(user_timezone).toFormat('HH:mm');
+  } catch (err) {
+    return res.status(400).json({ error: err.message });
   }
 
   let normalizedDateRangeStart;
@@ -437,8 +467,8 @@ router.get('/feasible', async (req, res) => {
           timeResult = checkTimeFeasibility(
             { ...eventWithNormalizedDateTimes, event_timezone: eventTimezone },
             {
-              friday_last_class_end,
-              monday_first_class_start,
+              friday_last_class_end: fridayLastClassEndHHMM,
+              monday_first_class_start: mondayFirstClassStartHHMM,
               user_timezone,
               avg_outbound_duration_minutes: outboundDuration,
               avg_return_duration_minutes:   returnDuration,

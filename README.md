@@ -95,8 +95,8 @@ Returns feasible hackathons for a given user context.
 | Param | Required | Description |
 |---|---|---|
 | `origin_airport` | ✓ | 1-3 IATA codes (supports repeated params, comma-separated text, or JSON array), e.g. `LAX` |
-| `friday_last_class_end` | ✓ | `HH:MM` in user's timezone |
-| `monday_first_class_start` | ✓ | `HH:MM` in user's timezone |
+| `friday_last_class_end` | ✓ | ISO 8601 datetime with explicit timezone (`Z` or `±HH:MM`) |
+| `monday_first_class_start` | ✓ | ISO 8601 datetime with explicit timezone (`Z` or `±HH:MM`) |
 | `user_timezone` | ✓ | IANA string, e.g. `America/New_York` |
 | `budget` | ✓ | Total all-in budget (USD) |
 | `include_lodging` | — | Default `true` |
