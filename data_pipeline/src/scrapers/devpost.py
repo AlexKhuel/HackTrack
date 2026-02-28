@@ -22,7 +22,7 @@ import sys
 import warnings
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import asdict, dataclass
-from datetime import datetime, time
+from datetime import datetime, time, timezone
 from typing import Any, Iterable
 
 import requests
@@ -57,7 +57,7 @@ TAG_RE = re.compile(r"<[^>]+>")
 SPACE_RE = re.compile(r"\s+")
 
 PRIZE_NUMBER_RE = re.compile(
-    r"(?P<symbol>[$€£₹¥])\s*(?P<number>\d{1,3}(?:,\d{3})*(?:\.\d+)?|\d+(?:\.\d+)?)"
+    r"(?P<symbol>[$€£₹¥])\s*(?P<number>\d{1,3}(?:,\d{2,3})*(?:\.\d+)?|\d+(?:\.\d+)?)"
     r"\s*(?P<suffix>[kKmM])?"
 )
 
@@ -88,6 +88,10 @@ def build_session() -> requests.Session:
     session.mount("http://", adapter)
     session.mount("https://", adapter)
     return session
+
+
+def log(message: str) -> None:
+    print(f"[{datetime.now(timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ')}] {message}")
 
 
 def normalize_space(text: str) -> str:
@@ -402,6 +406,7 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
 
 def main(argv: list[str]) -> int:
     args = parse_args(argv)
+    log("Starting Devpost scraper")
 
     statuses = [part.strip().lower() for part in args.statuses.split(",") if part.strip()]
     allowed = {"open", "upcoming", "ended"}
@@ -411,6 +416,7 @@ def main(argv: list[str]) -> int:
         return 2
     if not statuses:
         statuses = ["open", "upcoming"]
+    log(f"Using statuses: {','.join(statuses)}")
 
     output_format = infer_format(args.output, args.format)
 
@@ -428,6 +434,7 @@ def main(argv: list[str]) -> int:
         session.close()
         return 1
     session.close()
+    log(f"Fetched {len(records)} raw hackathon records from Devpost API")
 
     # Deduplicate by website while preserving first occurrence order.
     deduped: list[HackathonRecord] = []
@@ -439,8 +446,11 @@ def main(argv: list[str]) -> int:
         seen.add(key)
         deduped.append(record)
     records = deduped
+    log(f"Retained {len(records)} records after URL dedupe")
 
     if args.enrich_missing_prize and records:
+        missing_prize_count = sum(1 for record in records if not record.total_prize)
+        log(f"Enriching missing prizes for {missing_prize_count} records with {args.workers} workers")
         records = enrich_missing_prizes(records, timeout=args.timeout, workers=args.workers)
 
     output_records(records, args.output, output_format)

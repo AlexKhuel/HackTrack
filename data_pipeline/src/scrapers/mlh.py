@@ -91,11 +91,11 @@ SYMBOL_TO_CODE = {
 
 SYMBOL_AMOUNT_RE = re.compile(
     r"(?P<symbol>[$€£₹¥])\s*"
-    r"(?P<number>\d{1,3}(?:,\d{3})*(?:\.\d+)?|\d+(?:\.\d+)?)"
+    r"(?P<number>\d{1,3}(?:,\d{2,3})*(?:\.\d+)?|\d+(?:\.\d+)?)"
     r"\s*(?P<suffix>[kKmM])?"
 )
 CODE_AMOUNT_RE = re.compile(
-    r"(?P<number>\d{1,3}(?:,\d{3})*(?:\.\d+)?|\d+(?:\.\d+)?)"
+    r"(?P<number>\d{1,3}(?:,\d{2,3})*(?:\.\d+)?|\d+(?:\.\d+)?)"
     r"\s*(?P<suffix>[kKmM])?\s*"
     r"(?P<code>USD|CAD|EUR|GBP|INR|AUD|JPY|PKR|MXN|SGD)\b",
     re.IGNORECASE,
@@ -128,6 +128,10 @@ def build_session() -> requests.Session:
     session.mount("http://", adapter)
     session.mount("https://", adapter)
     return session
+
+
+def log(message: str) -> None:
+    print(f"[{datetime.now(timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ')}] {message}")
 
 
 def normalize_space(text: str) -> str:
@@ -523,8 +527,10 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
 
 def main(argv: list[str]) -> int:
     args = parse_args(argv)
+    log("Starting MLH scraper")
     output_format = infer_format(args.output, args.format)
     session = build_session()
+    log(f"Fetching MLH season page: {args.season_url}")
 
     try:
         records = scrape_mlh_events(
@@ -538,17 +544,21 @@ def main(argv: list[str]) -> int:
         session.close()
         return 1
     session.close()
+    log(f"Fetched {len(records)} events from MLH")
 
     if args.max_events is not None:
         records = records[: args.max_events]
+        log(f"Applied max-events limit: {len(records)} records retained")
 
     if not args.no_enrich and records:
+        log(f"Enriching {len(records)} MLH events from event websites with {args.workers} workers")
         enriched: list[EventRecord] = []
         with ThreadPoolExecutor(max_workers=max(1, args.workers)) as pool:
             futures = [pool.submit(enrich_record, record, args.timeout) for record in records]
             for future in as_completed(futures):
                 enriched.append(future.result())
         records = sorted(enriched, key=lambda item: (item.start_datetime or "", item.name.casefold()))
+        log(f"Enrichment completed for {len(records)} MLH events")
 
     output_records(records, args.output, output_format)
     print(f"Wrote {len(records)} events to {args.output}")

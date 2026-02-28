@@ -1,0 +1,510 @@
+[
+  {
+    "city": "Albuquerque",
+    "nightly_rate": 86.6
+  },
+  {
+    "city": "Amarillo",
+    "nightly_rate": 72.4
+  },
+  {
+    "city": "Anaheim",
+    "nightly_rate": 109.0
+  },
+  {
+    "city": "Anchorage",
+    "nightly_rate": 91.0
+  },
+  {
+    "city": "Arlington",
+    "nightly_rate": 81.4
+  },
+  {
+    "city": "Atlanta",
+    "nightly_rate": 92.6
+  },
+  {
+    "city": "Augusta",
+    "nightly_rate": 85.2
+  },
+  {
+    "city": "Aurora",
+    "nightly_rate": 86.8
+  },
+  {
+    "city": "Austin",
+    "nightly_rate": 80.0
+  },
+  {
+    "city": "Bakersfield",
+    "nightly_rate": 79.8
+  },
+  {
+    "city": "Baltimore",
+    "nightly_rate": 107.2
+  },
+  {
+    "city": "Baton Rouge",
+    "nightly_rate": 74.8
+  },
+  {
+    "city": "Boise",
+    "nightly_rate": 106.6
+  },
+  {
+    "city": "Boston",
+    "nightly_rate": 137.8
+  },
+  {
+    "city": "Buffalo",
+    "nightly_rate": 99.0
+  },
+  {
+    "city": "Cape Coral",
+    "nightly_rate": 127.8
+  },
+  {
+    "city": "Chandler",
+    "nightly_rate": 113.4
+  },
+  {
+    "city": "Charlotte",
+    "nightly_rate": 90.2
+  },
+  {
+    "city": "Chesapeake",
+    "nightly_rate": 87.6
+  },
+  {
+    "city": "Chicago",
+    "nightly_rate": 101.0
+  },
+  {
+    "city": "Chula Vista",
+    "nightly_rate": 80.2
+  },
+  {
+    "city": "Cincinnati",
+    "nightly_rate": 121.2
+  },
+  {
+    "city": "Cleveland",
+    "nightly_rate": 96.4
+  },
+  {
+    "city": "Colorado Springs",
+    "nightly_rate": 90.2
+  },
+  {
+    "city": "Columbus",
+    "nightly_rate": 80.0
+  },
+  {
+    "city": "Corpus Christi",
+    "nightly_rate": 86.2
+  },
+  {
+    "city": "Dallas",
+    "nightly_rate": 104.2
+  },
+  {
+    "city": "Denver",
+    "nightly_rate": 100.8
+  },
+  {
+    "city": "Des Moines",
+    "nightly_rate": 89.6
+  },
+  {
+    "city": "Detroit",
+    "nightly_rate": 119.4
+  },
+  {
+    "city": "Durham",
+    "nightly_rate": 98.2
+  },
+  {
+    "city": "El Paso",
+    "nightly_rate": 64.6
+  },
+  {
+    "city": "Fayetteville",
+    "nightly_rate": 72.2
+  },
+  {
+    "city": "Fontana",
+    "nightly_rate": 95.8
+  },
+  {
+    "city": "Fort Wayne",
+    "nightly_rate": 76.8
+  },
+  {
+    "city": "Fort Worth",
+    "nightly_rate": 80.2
+  },
+  {
+    "city": "Fremont",
+    "nightly_rate": 93.8
+  },
+  {
+    "city": "Fresno",
+    "nightly_rate": 73.4
+  },
+  {
+    "city": "Frisco",
+    "nightly_rate": 87.8
+  },
+  {
+    "city": "Garland",
+    "nightly_rate": 67.0
+  },
+  {
+    "city": "Gilbert",
+    "nightly_rate": 120.4
+  },
+  {
+    "city": "Glendale",
+    "nightly_rate": 107.2
+  },
+  {
+    "city": "Grand Prairie",
+    "nightly_rate": 80.6
+  },
+  {
+    "city": "Grand Rapids",
+    "nightly_rate": 75.8
+  },
+  {
+    "city": "Greensboro",
+    "nightly_rate": 95.2
+  },
+  {
+    "city": "Henderson",
+    "nightly_rate": 58.8
+  },
+  {
+    "city": "Hialeah",
+    "nightly_rate": 228.2
+  },
+  {
+    "city": "Honolulu",
+    "nightly_rate": 145.0
+  },
+  {
+    "city": "Houston",
+    "nightly_rate": 70.4
+  },
+  {
+    "city": "Huntsville",
+    "nightly_rate": 88.2
+  },
+  {
+    "city": "Indianapolis",
+    "nightly_rate": 85.6
+  },
+  {
+    "city": "Irvine",
+    "nightly_rate": 158.0
+  },
+  {
+    "city": "Irving",
+    "nightly_rate": 80.8
+  },
+  {
+    "city": "Jacksonville",
+    "nightly_rate": 71.4
+  },
+  {
+    "city": "Jersey City",
+    "nightly_rate": 144.0
+  },
+  {
+    "city": "Kansas City",
+    "nightly_rate": 81.0
+  },
+  {
+    "city": "Laredo",
+    "nightly_rate": 62.0
+  },
+  {
+    "city": "Las Vegas",
+    "nightly_rate": 124.0
+  },
+  {
+    "city": "Lexington",
+    "nightly_rate": 103.2
+  },
+  {
+    "city": "Lincoln",
+    "nightly_rate": 86.8
+  },
+  {
+    "city": "Little Rock",
+    "nightly_rate": 88.8
+  },
+  {
+    "city": "Long Beach",
+    "nightly_rate": 124.6
+  },
+  {
+    "city": "Los Angeles",
+    "nightly_rate": 105.0
+  },
+  {
+    "city": "Louisville",
+    "nightly_rate": 77.2
+  },
+  {
+    "city": "Lubbock",
+    "nightly_rate": 72.4
+  },
+  {
+    "city": "Madison",
+    "nightly_rate": 65.4
+  },
+  {
+    "city": "McKinney",
+    "nightly_rate": 78.0
+  },
+  {
+    "city": "Memphis",
+    "nightly_rate": 91.4
+  },
+  {
+    "city": "Mesa",
+    "nightly_rate": 129.6
+  },
+  {
+    "city": "Miami",
+    "nightly_rate": 289.0
+  },
+  {
+    "city": "Milwaukee",
+    "nightly_rate": 106.6
+  },
+  {
+    "city": "Minneapolis",
+    "nightly_rate": 103.4
+  },
+  {
+    "city": "Mobile",
+    "nightly_rate": 96.4
+  },
+  {
+    "city": "Modesto",
+    "nightly_rate": 92.2
+  },
+  {
+    "city": "Moreno Valley",
+    "nightly_rate": 90.8
+  },
+  {
+    "city": "Nashville",
+    "nightly_rate": 110.8
+  },
+  {
+    "city": "New Orleans",
+    "nightly_rate": 94.6
+  },
+  {
+    "city": "New York",
+    "nightly_rate": 162.2
+  },
+  {
+    "city": "Newark",
+    "nightly_rate": 102.8
+  },
+  {
+    "city": "Norfolk",
+    "nightly_rate": 83.8
+  },
+  {
+    "city": "North Las Vegas",
+    "nightly_rate": 58.8
+  },
+  {
+    "city": "Oakland",
+    "nightly_rate": 97.8
+  },
+  {
+    "city": "Oklahoma City",
+    "nightly_rate": 75.0
+  },
+  {
+    "city": "Omaha",
+    "nightly_rate": 97.6
+  },
+  {
+    "city": "Orlando",
+    "nightly_rate": 75.4
+  },
+  {
+    "city": "Overland Park",
+    "nightly_rate": 85.6
+  },
+  {
+    "city": "Oxnard",
+    "nightly_rate": 129.0
+  },
+  {
+    "city": "Philadelphia",
+    "nightly_rate": 95.8
+  },
+  {
+    "city": "Phoenix",
+    "nightly_rate": 121.6
+  },
+  {
+    "city": "Pittsburgh",
+    "nightly_rate": 100.2
+  },
+  {
+    "city": "Plano",
+    "nightly_rate": 67.4
+  },
+  {
+    "city": "Port St. Lucie",
+    "nightly_rate": 176.0
+  },
+  {
+    "city": "Portland",
+    "nightly_rate": 90.6
+  },
+  {
+    "city": "Raleigh",
+    "nightly_rate": 82.0
+  },
+  {
+    "city": "Reno",
+    "nightly_rate": 85.0
+  },
+  {
+    "city": "Richmond",
+    "nightly_rate": 89.4
+  },
+  {
+    "city": "Riverside",
+    "nightly_rate": 93.0
+  },
+  {
+    "city": "Rochester",
+    "nightly_rate": 95.8
+  },
+  {
+    "city": "Sacramento",
+    "nightly_rate": 108.2
+  },
+  {
+    "city": "Saint Paul",
+    "nightly_rate": 78.0
+  },
+  {
+    "city": "Salt Lake City",
+    "nightly_rate": 85.6
+  },
+  {
+    "city": "San Antonio",
+    "nightly_rate": 84.0
+  },
+  {
+    "city": "San Bernardino",
+    "nightly_rate": 91.8
+  },
+  {
+    "city": "San Diego",
+    "nightly_rate": 126.8
+  },
+  {
+    "city": "San Francisco",
+    "nightly_rate": 94.0
+  },
+  {
+    "city": "San Jose",
+    "nightly_rate": 101.2
+  },
+  {
+    "city": "Santa Ana",
+    "nightly_rate": 92.0
+  },
+  {
+    "city": "Santa Clarita",
+    "nightly_rate": 119.0
+  },
+  {
+    "city": "Scottsdale",
+    "nightly_rate": 140.2
+  },
+  {
+    "city": "Seattle",
+    "nightly_rate": 93.2
+  },
+  {
+    "city": "Sioux Falls",
+    "nightly_rate": 76.2
+  },
+  {
+    "city": "Spokane",
+    "nightly_rate": 79.0
+  },
+  {
+    "city": "St. Louis",
+    "nightly_rate": 100.6
+  },
+  {
+    "city": "St. Petersburg",
+    "nightly_rate": 142.8
+  },
+  {
+    "city": "Stockton",
+    "nightly_rate": 83.6
+  },
+  {
+    "city": "Tacoma",
+    "nightly_rate": 102.6
+  },
+  {
+    "city": "Tallahassee",
+    "nightly_rate": 87.8
+  },
+  {
+    "city": "Tampa",
+    "nightly_rate": 85.4
+  },
+  {
+    "city": "Toledo",
+    "nightly_rate": 79.8
+  },
+  {
+    "city": "Tucson",
+    "nightly_rate": 93.4
+  },
+  {
+    "city": "Tulsa",
+    "nightly_rate": 79.0
+  },
+  {
+    "city": "Virginia Beach",
+    "nightly_rate": 86.4
+  },
+  {
+    "city": "Washington",
+    "nightly_rate": 137.2
+  },
+  {
+    "city": "Wichita",
+    "nightly_rate": 76.6
+  },
+  {
+    "city": "Winston-Salem",
+    "nightly_rate": 87.4
+  },
+  {
+    "city": "Worcester",
+    "nightly_rate": 101.8
+  },
+  {
+    "city": "Yonkers",
+    "nightly_rate": 124.0
+  }
+]

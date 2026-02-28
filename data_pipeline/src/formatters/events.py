@@ -51,8 +51,44 @@ DEFAULT_OUTPUT_FIELDS = [
 
 SPACE_RE = re.compile(r"\s+")
 NON_ALNUM_RE = re.compile(r"[^a-z0-9]+")
-NUMBER_RE = re.compile(r"(?<!\d)(\d{1,3}(?:,\d{3})+|\d+(?:\.\d+)?)([kKmM]?)(?!\d)")
+NUMBER_RE = re.compile(r"(?<!\d)(\d{1,3}(?:,\d{2,3})+|\d+(?:\.\d+)?)([kKmM]?)(?!\d)")
 ONLINE_RE = re.compile(r"\b(online|virtual|remote|worldwide|global)\b", re.IGNORECASE)
+
+# Currency detection patterns (mirrors scraper output formats).
+SYMBOL_AMOUNT_RE = re.compile(
+    r"(?P<symbol>[$€£₹¥])\s*"
+    r"(?P<number>\d{1,3}(?:,\d{2,3})*(?:\.\d+)?|\d+(?:\.\d+)?)"
+    r"\s*(?P<suffix>[kKmM])?"
+)
+CODE_AMOUNT_RE = re.compile(
+    r"(?P<number>\d{1,3}(?:,\d{2,3})*(?:\.\d+)?|\d+(?:\.\d+)?)"
+    r"\s*(?P<suffix>[kKmM])?\s*"
+    r"(?P<code>USD|CAD|EUR|GBP|INR|AUD|JPY|PKR|MXN|SGD)\b",
+    re.IGNORECASE,
+)
+
+SYMBOL_TO_CODE = {
+    "$": "USD",
+    "€": "EUR",
+    "£": "GBP",
+    "₹": "INR",
+    "¥": "JPY",
+}
+
+# Approximate static exchange rates to USD (updated Feb 2026).
+# These avoid an external API dependency; update periodically as needed.
+CURRENCY_TO_USD: dict[str, float] = {
+    "USD": 1.0,
+    "CAD": 0.72,
+    "EUR": 1.08,
+    "GBP": 1.27,
+    "INR": 0.012,
+    "AUD": 0.65,
+    "JPY": 0.0067,
+    "PKR": 0.0036,
+    "MXN": 0.058,
+    "SGD": 0.74,
+}
 
 COUNTRY_ALIASES = {
     "US": "United States",
@@ -203,6 +239,11 @@ US_STATE_NAMES = {
 }
 
 
+def log(message: str) -> None:
+    ts = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    print(f"[{ts}] {message}")
+
+
 def normalize_space(value: str | None) -> str | None:
     if value is None:
         return None
@@ -280,6 +321,11 @@ def to_utc_timestamp(value: Any) -> str | None:
 
 
 def parse_prize_pool(value: Any) -> int | None:
+    """Extract the prize amount from a scraper total_prize string and convert to USD.
+
+    Supports symbol-prefixed (e.g. ₹500,000) and code-suffixed (e.g. CAD 5,000)
+    formats. Amounts without a recognized currency default to USD.
+    """
     if value is None:
         return None
     if isinstance(value, bool):
@@ -291,6 +337,39 @@ def parse_prize_pool(value: Any) -> int | None:
     if not text:
         return None
 
+    # Try to extract amounts with explicit currency info first.
+    currency_amounts: list[tuple[str, float]] = []
+
+    for match in SYMBOL_AMOUNT_RE.finditer(text):
+        symbol = match.group("symbol")
+        raw_number = float(match.group("number").replace(",", ""))
+        suffix = (match.group("suffix") or "").lower()
+        if suffix == "k":
+            raw_number *= 1_000
+        elif suffix == "m":
+            raw_number *= 1_000_000
+        code = SYMBOL_TO_CODE.get(symbol, "USD")
+        currency_amounts.append((code, raw_number))
+
+    for match in CODE_AMOUNT_RE.finditer(text):
+        raw_number = float(match.group("number").replace(",", ""))
+        suffix = (match.group("suffix") or "").lower()
+        if suffix == "k":
+            raw_number *= 1_000
+        elif suffix == "m":
+            raw_number *= 1_000_000
+        code = match.group("code").upper()
+        currency_amounts.append((code, raw_number))
+
+    if currency_amounts:
+        # Pick the largest amount (after USD conversion).
+        best_usd = max(
+            amount * CURRENCY_TO_USD.get(code, 1.0)
+            for code, amount in currency_amounts
+        )
+        return int(round(best_usd))
+
+    # Fallback: plain numbers without currency symbol (assume USD).
     amounts: list[float] = []
     for number, suffix in NUMBER_RE.findall(text):
         base = float(number.replace(",", ""))
@@ -444,6 +523,8 @@ def url_rank(url: str | None) -> tuple[int, int]:
     host = urlparse(url).netloc
     rank = 0
     if "devpost.com" in host:
+        rank -= 2
+    if "devfolio.co" in host:
         rank -= 2
     if "mlh" in host:
         rank -= 1
@@ -602,6 +683,8 @@ def merge_by_name_start(records: list[dict[str, Any]]) -> list[dict[str, Any]]:
 def strip_internal_fields(records: list[dict[str, Any]]) -> list[dict[str, Any]]:
     cleaned: list[dict[str, Any]] = []
     for record in records:
+        if record.get("in_person") is False:
+            continue
         cleaned.append({field: record.get(field) for field in DEFAULT_OUTPUT_FIELDS})
     return cleaned
 
@@ -630,7 +713,7 @@ def write_output(records: list[dict[str, Any]], output_path: Path, output_format
     raise ValueError(f"Unsupported output format: {output_format}")
 
 
-def discover_default_inputs(repo_root: Path) -> tuple[list[Path], list[Path]]:
+def discover_default_inputs(repo_root: Path) -> tuple[list[Path], list[Path], list[Path]]:
     mlh_patterns = [
         "MLH-Scraper/mlh*.json",
         "MLH-Scraper/mlh*.csv",
@@ -643,28 +726,39 @@ def discover_default_inputs(repo_root: Path) -> tuple[list[Path], list[Path]]:
         "devpost*.json",
         "devpost*.csv",
     ]
+    devfolio_patterns = [
+        "Devfolio-Scraper/devfolio*.json",
+        "Devfolio-Scraper/devfolio*.csv",
+        "devfolio*.json",
+        "devfolio*.csv",
+    ]
 
     mlh_files: list[Path] = []
     devpost_files: list[Path] = []
+    devfolio_files: list[Path] = []
 
     for pattern in mlh_patterns:
         mlh_files.extend(sorted(repo_root.glob(pattern)))
     for pattern in devpost_patterns:
         devpost_files.extend(sorted(repo_root.glob(pattern)))
+    for pattern in devfolio_patterns:
+        devfolio_files.extend(sorted(repo_root.glob(pattern)))
 
     # Preserve order while removing duplicates.
     mlh_unique = list(dict.fromkeys(path.resolve() for path in mlh_files))
     devpost_unique = list(dict.fromkeys(path.resolve() for path in devpost_files))
-    return mlh_unique, devpost_unique
+    devfolio_unique = list(dict.fromkeys(path.resolve() for path in devfolio_files))
+    return mlh_unique, devpost_unique, devfolio_unique
 
 
 def parse_args(argv: list[str]) -> argparse.Namespace:
     script_dir = Path(__file__).resolve().parent
     parser = argparse.ArgumentParser(
-        description="Clean MLH/Devpost scraped data for Supabase events ingestion."
+        description="Clean MLH/Devpost/Devfolio scraped data for Supabase events ingestion."
     )
     parser.add_argument("--mlh", nargs="*", default=None, help="MLH input files (JSON or CSV)")
     parser.add_argument("--devpost", nargs="*", default=None, help="Devpost input files (JSON or CSV)")
+    parser.add_argument("--devfolio", nargs="*", default=None, help="Devfolio input files (JSON or CSV)")
     parser.add_argument(
         "--output",
         default=str(script_dir / "cleaned_events.json"),
@@ -677,40 +771,62 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
 def main(argv: list[str]) -> int:
     args = parse_args(argv)
     output_path = Path(args.output).expanduser().resolve()
+    log(f"Starting clean_events.py (output={output_path})")
 
     script_dir = Path(__file__).resolve().parent
     repo_root = script_dir.parent
 
-    if args.mlh is None and args.devpost is None:
-        mlh_files, devpost_files = discover_default_inputs(repo_root)
+    if args.mlh is None and args.devpost is None and args.devfolio is None:
+        mlh_files, devpost_files, devfolio_files = discover_default_inputs(repo_root)
+        log(
+            "Auto-discovered input files: "
+            f"mlh={len(mlh_files)}, devpost={len(devpost_files)}, devfolio={len(devfolio_files)}"
+        )
     else:
         mlh_files = [Path(path).expanduser().resolve() for path in (args.mlh or [])]
         devpost_files = [Path(path).expanduser().resolve() for path in (args.devpost or [])]
+        devfolio_files = [Path(path).expanduser().resolve() for path in (args.devfolio or [])]
+        log(
+            "Using explicit input files: "
+            f"mlh={len(mlh_files)}, devpost={len(devpost_files)}, devfolio={len(devfolio_files)}"
+        )
 
-    if not mlh_files and not devpost_files:
+    if not mlh_files and not devpost_files and not devfolio_files:
         print(
-            "No input files found. Provide --mlh/--devpost paths or place scraper outputs in MLH-Scraper/ and Devpost-Scraper/.",
+            (
+                "No input files found. Provide --mlh/--devpost/--devfolio paths or place scraper outputs "
+                "in MLH-Scraper/, Devpost-Scraper/, and Devfolio-Scraper/."
+            ),
             file=sys.stderr,
         )
         return 2
 
     try:
-        records = []
-        records.extend(load_normalized_records(mlh_files, "mlh"))
-        records.extend(load_normalized_records(devpost_files, "devpost"))
+        mlh_records = load_normalized_records(mlh_files, "mlh")
+        devpost_records = load_normalized_records(devpost_files, "devpost")
+        devfolio_records = load_normalized_records(devfolio_files, "devfolio")
+        records = mlh_records + devpost_records + devfolio_records
     except (FileNotFoundError, ValueError, json.JSONDecodeError) as exc:
         print(f"Failed to read input files: {exc}", file=sys.stderr)
         return 1
+
+    log(
+        "Loaded normalized records: "
+        f"mlh={len(mlh_records)}, devpost={len(devpost_records)}, devfolio={len(devfolio_records)}, total={len(records)}"
+    )
 
     if not records:
         print("No valid records found in input files.", file=sys.stderr)
         return 1
 
+    pre_dedupe_count = len(records)
     merged = merge_by_url(records)
     merged = merge_by_name_start(merged)
+    log(f"Merged records after dedupe: {len(merged)} (from {pre_dedupe_count})")
 
     merged.sort(key=lambda row: ((row.get("start_datetime_utc") or ""), (row.get("name") or "").casefold()))
     cleaned = strip_internal_fields(merged)
+    log(f"Final cleaned records (in-person only): {len(cleaned)}")
 
     output_format = infer_output_format(output_path, args.format)
     write_output(cleaned, output_path, output_format)

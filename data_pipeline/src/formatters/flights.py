@@ -54,6 +54,11 @@ OUTPUT_FIELDS = [
 ]
 
 
+def log(message: str) -> None:
+    ts = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    print(f"[{ts}] {message}")
+
+
 @dataclass
 class RunningStats:
     count: int = 0
@@ -324,6 +329,7 @@ def main(argv: list[str]) -> int:
     args = parse_args(argv)
     input_path = Path(args.input).expanduser().resolve()
     output_path = Path(args.output).expanduser().resolve()
+    log(f"Starting flights formatter (input={input_path}, output={output_path})")
 
     if not input_path.exists():
         print(f"Input file not found: {input_path}", file=sys.stderr)
@@ -334,12 +340,14 @@ def main(argv: list[str]) -> int:
     except Exception as exc:
         print(f"Failed to load airport timezone mapping: {exc}", file=sys.stderr)
         return 2
+    log(f"Loaded airport timezone mappings: {len(airport_tz)}")
 
     try:
         rows = read_rows(input_path)
     except Exception as exc:
         print(f"Failed to read input CSV: {exc}", file=sys.stderr)
         return 1
+    log(f"Read {len(rows)} raw flight rows")
 
     formatted_rows, skipped = format_for_routes(
         raw_rows=rows,
@@ -347,6 +355,7 @@ def main(argv: list[str]) -> int:
         orientation=args.orientation,
         id_start=args.id_start,
     )
+    log(f"Formatted {len(formatted_rows)} route rows (skipped {skipped} raw rows)")
 
     if not formatted_rows:
         print("No output rows generated. Check input columns/timezones.", file=sys.stderr)

@@ -20,8 +20,18 @@ __pycache__/
 # Local outputs
 *.json
 *.csv
-!Supabase-Pipeline/package.json
-!Supabase-Pipeline/package-lock.json
+!data_pipeline/package.json
+!data_pipeline/package-lock.json
+!data_pipeline/data/routes_weighted_post2020.json
+!data_pipeline/data/lodging_formatted.json
+!data_pipeline/data/us_city_hotel_average_prices.csv
+!backend/package.json
+!backend/package-lock.json
 
 # macOS
 .DS_Store
+
+# Node backend
+backend/node_modules/
+backend/.env
+hackathon_team_tasks_36h.docx
