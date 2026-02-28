@@ -5,10 +5,7 @@ import {
     inferBrowserTimezone,
     normalizeAirportCode,
 } from "../utils/airportMetadata";
-import {
-    localTimeToUtc,
-    utcTimeToLocalInput,
-} from "../utils/classTimes";
+import { localTimeToUtc, utcTimeToLocalInput } from "../utils/classTimes";
 
 const FIELD_INPUT =
     "w-full bg-[rgba(245,237,214,0.07)] border border-[rgba(0,200,180,0.18)] rounded-[6px] px-4 py-3 text-[var(--cream)] placeholder:text-[rgba(245,237,214,0.3)] outline-none focus:border-[var(--teal)] font-['Syne',sans-serif]";
@@ -268,7 +265,7 @@ export default function InputForm({ initialValues, onSubmit }) {
                         <input
                             value={values.name}
                             onChange={update("name")}
-                            placeholder="Linus"
+                            placeholder="Linus Torvald"
                             inputMode="text"
                             className={FIELD_INPUT}
                         />
