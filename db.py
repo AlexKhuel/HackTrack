@@ -3,7 +3,8 @@ from sqlalchemy import create_engine, text
 import os
 import pandas as pd
 app = FastAPI()
-
+from dotenv import load_dotenv
+load_dotenv()
 DATABASE_URL = os.getenv("DATABASE_URL")
 
 if not DATABASE_URL:

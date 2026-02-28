@@ -43,6 +43,7 @@ def prize_to_hotel_cost_score(feasible_events):
         on="city",
         how="left"
     )
+    print(df.columns)
 
     # Compute nights of event
     df["nights"] = (
@@ -50,7 +51,8 @@ def prize_to_hotel_cost_score(feasible_events):
         pd.to_datetime(df["start_datetime_utc"])
     ).dt.days
     #Some cities have no lodging info, we can impute the hotel cost with the average cost per night across all cities
-    df["avg_cost_per_night"] = df["avg_cost_per_night"].fillna(lodging["avg_cost_per_night"].mean())
+    df["avg_cost_per_night"] = df["nightly_rate_x"].fillna(
+        lodging["nightly_rate"].mean())
     df["hotel_cost"] = df["avg_cost_per_night"] * df["nights"]
 
     max_cost = df["hotel_cost"].max()
@@ -86,9 +88,20 @@ def travel_time_score(feasible_events):
 
 
 def scored(max_cost, max_time):
-
+    max_time = max_time * 60 #Convert hours to minutes
     events = load_events()
     routes = load_routes()
+
+    routes = (#In case of duplicates routes per city
+        routes
+        .groupby("destination_city", as_index=False)
+        .agg({
+            "avg_outbound_price": "mean",
+            "avg_return_price": "mean",
+            "avg_outbound_duration_minutes": "mean",
+            "avg_return_duration_minutes": "mean"
+        })
+    )
     #lodging = load_lodging()
 
     # Merge events + routes (match by city)
@@ -100,10 +113,32 @@ def scored(max_cost, max_time):
     )
 
     # Create total metrics
+    lodging = load_lodging()
+
+    # Merge on city
+    df = df.merge(
+        lodging,
+        on="city",
+        how="left"
+    )
+
+    # Compute nights of event
+    df["nights"] = (
+        pd.to_datetime(df["end_datetime_utc"]) -
+        pd.to_datetime(df["start_datetime_utc"])
+    ).dt.days
+    #Some cities have no lodging info, we can impute the hotel cost with the average cost per night across all cities
+    df["avg_cost_per_night"] = df["nightly_rate"]
+    df["avg_cost_per_night"] = df["avg_cost_per_night"].fillna(lodging["nightly_rate"].mean())
+    df["hotel_cost"] = df["avg_cost_per_night"] * df["nights"]
+
     df["total_cost"] = (
         df["avg_outbound_price"] +
-        df["avg_return_price"]
+        df["avg_return_price"] +
+        df["hotel_cost"]
     )
+    max_hackathon_cost = df["total_cost"].max()
+    min_hackathon_cost = df["total_cost"].min()
 
     df["total_time"] = (
         df["avg_outbound_duration_minutes"] +
@@ -118,6 +153,7 @@ def scored(max_cost, max_time):
 
     if feasible_events.empty:
         return feasible_events
+    
 
     # -------------------------
     # 1️⃣ Prize Score (0–1)
@@ -132,16 +168,32 @@ def scored(max_cost, max_time):
         feasible_events["prize_score"] = 0
 
     # -------------------------
-    # 2️⃣ Prize-to-Travel-Cost Score (0–1)
+    # 2️⃣ Prize-to-Total-Cost Score (0–1)
     # -------------------------
-    feasible_events["prize_to_travel_cost_score"] = prize_to_travel_cost_score(feasible_events)
+
+    feasible_events["total_cost"] = feasible_events["total_cost"].replace(0, 1e-6)  # avoid divide-by-zero
+    feasible_events["cost_ratio"] = (
+    feasible_events["prize_pool"] /
+    feasible_events["total_cost"].replace(0, 1e-6)
+)
+    
+    max_ratio = feasible_events["cost_ratio"].max()
+    min_ratio = feasible_events["cost_ratio"].min()
+
+    if max_ratio == min_ratio:
+        feasible_events["prize_to_total_cost_score"] = 0
+    else:
+        feasible_events["prize_to_total_cost_score"] = (
+            (feasible_events["cost_ratio"] - min_ratio) /
+            (max_ratio - min_ratio)
+        )
 
     # -------------------------
     # 3️⃣ Prize-to-Hotel-Cost Score (0–1)
     # -------------------------
     # Example: compute nights if needed
 
-    feasible_events["prize_to_hotel_cost_score"] = prize_to_hotel_cost_score(feasible_events)
+    #feasible_events["prize_to_hotel_cost_score"] = prize_to_hotel_cost_score(feasible_events)
 
     # -------------------------
     # 4️⃣ Travel Time Score (0–1)
@@ -152,10 +204,9 @@ def scored(max_cost, max_time):
     # Final Weighted Score
     # -------------------------
     feasible_events["final_score"] = (
-        0.4 * feasible_events["prize_score"] +
-        0.3 * feasible_events["prize_to_travel_cost_score"] +
-        0.2 * feasible_events["prize_to_hotel_cost_score"] +
-        0.1 * feasible_events["travel_time_score"]
+        0.5 * feasible_events["prize_score"] +
+        0.3 * feasible_events["prize_to_total_cost_score"] +
+        0.2 * feasible_events["travel_time_score"]
     )
-
-    return feasible_events.sort_values("final_score", ascending=False)
+    print(feasible_events.sort_values("final_score", ascending=False)[["name", "city", "prize_pool", "total_cost", "total_time", "travel_time_score", "final_score"]].drop_duplicates(subset=["name", "city"]))
+    return feasible_events.sort_values("final_score", ascending=False).drop_duplicates(subset=["name", "city"])
