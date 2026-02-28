@@ -5,13 +5,30 @@
 
 const fs = require('node:fs');
 const path = require('node:path');
-const { spawnSync } = require('node:child_process');
+const { spawn } = require('node:child_process');
 
 const SCRIPT_DIR = __dirname;
 const REPO_ROOT = path.resolve(SCRIPT_DIR, '..');
 
+function timestamp() {
+    return new Date().toISOString();
+}
+
 function log(message) {
-    process.stdout.write(`${message}\n`);
+    process.stdout.write(`[${timestamp()}] ${message}\n`);
+}
+
+function formatDuration(ms) {
+    const totalSeconds = Math.max(0, Math.round(ms / 1000));
+    const minutes = Math.floor(totalSeconds / 60);
+    const seconds = totalSeconds % 60;
+    if (minutes === 0) return `${seconds}s`;
+    return `${minutes}m ${seconds}s`;
+}
+
+function parseOptionalInt(value, fallback = null) {
+    const parsed = Number.parseInt(value, 10);
+    return Number.isFinite(parsed) ? parsed : fallback;
 }
 
 function loadEnvFile(envPath) {
@@ -32,15 +49,96 @@ function loadEnvFile(envPath) {
     }
 }
 
-function runCommand(cmd, args, cwd) {
-    log(`$ ${cmd} ${args.join(' ')}`);
-    const result = spawnSync(cmd, args, { cwd, stdio: 'inherit' });
-    if (result.error) {
-        throw result.error;
-    }
-    if (result.status !== 0) {
-        throw new Error(`Command failed with exit code ${result.status}`);
-    }
+function runCommand(cmd, args, cwd, options = {}) {
+    const {
+        hangWarningSeconds = 60,
+        commandTimeoutSeconds = 0,
+    } = options;
+
+    return new Promise((resolve, reject) => {
+        const commandText = `${cmd} ${args.join(' ')}`;
+        const startMs = Date.now();
+        let lastOutputMs = Date.now();
+        let lastWarningMs = 0;
+        let didTimeout = false;
+        let exited = false;
+
+        log(`$ ${commandText}`);
+
+        const child = spawn(cmd, args, {
+            cwd,
+            stdio: ['ignore', 'pipe', 'pipe'],
+        });
+
+        const relay = (chunk, destination) => {
+            lastOutputMs = Date.now();
+            destination.write(chunk);
+        };
+
+        child.stdout.on('data', (chunk) => relay(chunk, process.stdout));
+        child.stderr.on('data', (chunk) => relay(chunk, process.stderr));
+
+        let monitor = null;
+        if (hangWarningSeconds > 0 || commandTimeoutSeconds > 0) {
+            monitor = setInterval(() => {
+                const now = Date.now();
+                const quietMs = now - lastOutputMs;
+                const elapsedMs = now - startMs;
+
+                if (
+                    hangWarningSeconds > 0
+                    && quietMs >= hangWarningSeconds * 1000
+                    && now - lastWarningMs >= hangWarningSeconds * 1000
+                ) {
+                    log(
+                        `No subprocess output for ${Math.floor(quietMs / 1000)}s `
+                        + `(elapsed ${formatDuration(elapsedMs)}). Still running...`
+                    );
+                    lastWarningMs = now;
+                }
+
+                if (commandTimeoutSeconds > 0 && elapsedMs >= commandTimeoutSeconds * 1000 && !didTimeout) {
+                    didTimeout = true;
+                    log(`Command exceeded timeout (${commandTimeoutSeconds}s), sending SIGTERM.`);
+                    child.kill('SIGTERM');
+
+                    setTimeout(() => {
+                        if (!exited) {
+                            log('Subprocess did not exit after SIGTERM, sending SIGKILL.');
+                            child.kill('SIGKILL');
+                        }
+                    }, 10_000).unref();
+                }
+            }, 5_000);
+        }
+
+        const cleanup = () => {
+            if (monitor) clearInterval(monitor);
+        };
+
+        child.on('error', (error) => {
+            cleanup();
+            reject(error);
+        });
+
+        child.on('close', (code, signal) => {
+            cleanup();
+            exited = true;
+            const duration = formatDuration(Date.now() - startMs);
+
+            if (signal) {
+                reject(new Error(`Command terminated by signal ${signal} after ${duration}: ${commandText}`));
+                return;
+            }
+            if (code !== 0) {
+                reject(new Error(`Command failed with exit code ${code} after ${duration}: ${commandText}`));
+                return;
+            }
+
+            log(`Command completed in ${duration}: ${commandText}`);
+            resolve();
+        });
+    });
 }
 
 function parseArgs(argv) {
@@ -49,8 +147,10 @@ function parseArgs(argv) {
         cleanedOutput: null,
         mlhInput: null,
         devpostInput: null,
+        devfolioInput: null,
         skipMlh: false,
         skipDevpost: false,
+        skipDevfolio: false,
         mlhNoEnrich: false,
         devpostEnrichMissingPrize: false,
         devpostStatuses: 'open,upcoming',
@@ -68,6 +168,8 @@ function parseArgs(argv) {
         batchSize: 500,
         replaceExisting: false,
         dryRun: false,
+        hangWarningSeconds: 60,
+        commandTimeoutSeconds: 0,
     };
 
     for (let i = 0; i < argv.length; i++) {
@@ -76,13 +178,15 @@ function parseArgs(argv) {
         else if (token === '--cleaned-output') args.cleanedOutput = argv[++i];
         else if (token === '--mlh-input') args.mlhInput = argv[++i];
         else if (token === '--devpost-input') args.devpostInput = argv[++i];
+        else if (token === '--devfolio-input') args.devfolioInput = argv[++i];
         else if (token === '--skip-mlh') args.skipMlh = true;
         else if (token === '--skip-devpost') args.skipDevpost = true;
+        else if (token === '--skip-devfolio') args.skipDevfolio = true;
         else if (token === '--mlh-no-enrich') args.mlhNoEnrich = true;
         else if (token === '--devpost-enrich-missing-prize') args.devpostEnrichMissingPrize = true;
         else if (token === '--devpost-statuses') args.devpostStatuses = argv[++i];
-        else if (token === '--mlh-max-events') args.mlhMaxEvents = parseInt(argv[++i], 10);
-        else if (token === '--devpost-max-hackathons') args.devpostMaxHackathons = parseInt(argv[++i], 10);
+        else if (token === '--mlh-max-events') args.mlhMaxEvents = parseOptionalInt(argv[++i], null);
+        else if (token === '--devpost-max-hackathons') args.devpostMaxHackathons = parseOptionalInt(argv[++i], null);
         else if (token === '--include-flights') args.includeFlights = true;
         else if (token === '--flights-input') args.flightsInput = argv[++i];
         else if (token === '--routes-table') args.routesTable = argv[++i];
@@ -92,19 +196,30 @@ function parseArgs(argv) {
         else if (token === '--lodging-table') args.lodgingTable = argv[++i];
         else if (token === '--table') args.table = argv[++i];
         else if (token === '--db-url') args.dbUrl = argv[++i];
-        else if (token === '--batch-size') args.batchSize = parseInt(argv[++i], 10);
+        else if (token === '--batch-size') args.batchSize = parseOptionalInt(argv[++i], 500);
         else if (token === '--replace-existing') args.replaceExisting = true;
         else if (token === '--dry-run') args.dryRun = true;
+        else if (token === '--hang-warning-seconds') args.hangWarningSeconds = parseOptionalInt(argv[++i], 60);
+        else if (token === '--command-timeout-seconds') args.commandTimeoutSeconds = parseOptionalInt(argv[++i], 0);
         else if (token === '--help' || token === '-h') {
-            log("Usage: node run_pipeline.js [options]");
-            log("Run MLH + Devpost scrapers, clean merged data, and load into Supabase Postgres via JS.");
+            log('Usage: node run_pipeline.js [options]');
+            log('Run MLH + Devpost + Devfolio scrapers, clean merged data, and load into Supabase Postgres via JS.');
+            log('');
+            log('Options:');
+            log('  --hang-warning-seconds <n>     Warn if subprocess emits no output for n seconds (default: 60)');
+            log('  --command-timeout-seconds <n>  Kill subprocess after n seconds (default: 0 = disabled)');
             process.exit(0);
         }
     }
+
+    if (args.hangWarningSeconds < 0) args.hangWarningSeconds = 0;
+    if (args.commandTimeoutSeconds < 0) args.commandTimeoutSeconds = 0;
+    if (!Number.isFinite(args.batchSize) || args.batchSize <= 0) args.batchSize = 500;
+
     return args;
 }
 
-function main(argv) {
+async function main(argv) {
     const args = parseArgs(argv);
 
     loadEnvFile(path.join(REPO_ROOT, '.env'));
@@ -126,12 +241,26 @@ function main(argv) {
         ? path.resolve(args.cleanedOutput)
         : path.join(outputDir, 'cleaned_events.json');
 
+    const commandOptions = {
+        hangWarningSeconds: args.hangWarningSeconds,
+        commandTimeoutSeconds: args.commandTimeoutSeconds,
+    };
+
+    log('Starting data pipeline run.');
+    log(`Output directory: ${outputDir}`);
+    log(`Hang warning threshold: ${args.hangWarningSeconds}s`);
+    if (args.commandTimeoutSeconds > 0) {
+        log(`Command timeout: ${args.commandTimeoutSeconds}s`);
+    }
+
     let mlhInput = null;
     let devpostInput = null;
+    let devfolioInput = null;
 
     if (!args.skipMlh) {
         if (args.mlhInput) {
             mlhInput = path.resolve(args.mlhInput);
+            log(`Using existing MLH input: ${mlhInput}`);
         } else {
             const mlhOutput = path.join(outputDir, 'mlh_2026_events.json');
             const cmdArgs = [
@@ -140,17 +269,21 @@ function main(argv) {
                 mlhOutput,
             ];
             if (args.mlhNoEnrich) cmdArgs.push('--no-enrich');
-            if (args.mlhMaxEvents !== null && !isNaN(args.mlhMaxEvents)) {
+            if (args.mlhMaxEvents !== null && !Number.isNaN(args.mlhMaxEvents)) {
                 cmdArgs.push('--max-events', String(args.mlhMaxEvents));
             }
-            runCommand('python3', cmdArgs, REPO_ROOT);
+            log('Running MLH scraper...');
+            await runCommand('python3', cmdArgs, REPO_ROOT, commandOptions);
             mlhInput = mlhOutput;
         }
+    } else {
+        log('Skipping MLH source (--skip-mlh).');
     }
 
     if (!args.skipDevpost) {
         if (args.devpostInput) {
             devpostInput = path.resolve(args.devpostInput);
+            log(`Using existing Devpost input: ${devpostInput}`);
         } else {
             const devpostOutput = path.join(outputDir, 'devpost_hackathons.json');
             const cmdArgs = [
@@ -161,20 +294,44 @@ function main(argv) {
                 args.devpostStatuses,
             ];
             if (args.devpostEnrichMissingPrize) cmdArgs.push('--enrich-missing-prize');
-            if (args.devpostMaxHackathons !== null && !isNaN(args.devpostMaxHackathons)) {
+            if (args.devpostMaxHackathons !== null && !Number.isNaN(args.devpostMaxHackathons)) {
                 cmdArgs.push('--max-hackathons', String(args.devpostMaxHackathons));
             }
-            runCommand('python3', cmdArgs, REPO_ROOT);
+            log('Running Devpost scraper...');
+            await runCommand('python3', cmdArgs, REPO_ROOT, commandOptions);
             devpostInput = devpostOutput;
         }
+    } else {
+        log('Skipping Devpost source (--skip-devpost).');
     }
 
-    if (mlhInput === null && devpostInput === null && !args.includeFlights && !args.includeHotels) {
-        log("No data sources selected. Use default settings or provide --mlh-input/--devpost-input.");
+    if (!args.skipDevfolio) {
+        if (args.devfolioInput) {
+            devfolioInput = path.resolve(args.devfolioInput);
+            log(`Using existing Devfolio input: ${devfolioInput}`);
+        } else {
+            const devfolioOutput = path.join(outputDir, 'devfolio_hackathons.json');
+            const cmdArgs = [
+                path.join(SCRIPT_DIR, 'scrapers', 'devfolio', 'scrape_devfolio.py'),
+                '--output',
+                devfolioOutput,
+            ];
+            log('Running Devfolio scraper...');
+            await runCommand('python3', cmdArgs, REPO_ROOT, commandOptions);
+            devfolioInput = devfolioOutput;
+        }
+    } else {
+        log('Skipping Devfolio source (--skip-devfolio).');
+    }
+
+    const hasEventsSource = mlhInput !== null || devpostInput !== null || devfolioInput !== null;
+    if (!hasEventsSource && !args.includeFlights && !args.includeHotels) {
+        log('No data sources selected. Use default settings or provide --mlh-input/--devpost-input/--devfolio-input.');
         process.exit(2);
     }
 
-    if (!args.skipMlh || !args.skipDevpost) {
+    if (hasEventsSource) {
+        log('Cleaning and loading events data...');
         const cleanCmdArgs = [
             path.join(SCRIPT_DIR, 'formatters', 'events', 'clean_events.py'),
             '--output',
@@ -184,8 +341,9 @@ function main(argv) {
         ];
         if (mlhInput) cleanCmdArgs.push('--mlh', mlhInput);
         if (devpostInput) cleanCmdArgs.push('--devpost', devpostInput);
+        if (devfolioInput) cleanCmdArgs.push('--devfolio', devfolioInput);
 
-        runCommand('python3', cleanCmdArgs, REPO_ROOT);
+        await runCommand('python3', cleanCmdArgs, REPO_ROOT, commandOptions);
 
         const loadCmdArgs = [
             path.join(SCRIPT_DIR, 'loaders', 'load_to_supabase.js'),
@@ -200,42 +358,43 @@ function main(argv) {
         if (args.replaceExisting) loadCmdArgs.push('--replace-existing');
         if (args.dryRun) loadCmdArgs.push('--dry-run');
 
-        runCommand('node', loadCmdArgs, REPO_ROOT);
+        await runCommand('node', loadCmdArgs, REPO_ROOT, commandOptions);
         log(`Cleaned events output: ${cleanedOutput}`);
     }
 
     if (args.includeFlights) {
         if (!args.flightsInput) {
-            log("Missing --flights-input required for flights pipeline.");
+            log('Missing --flights-input required for flights pipeline.');
             process.exit(2);
         }
         const flightsInput = path.resolve(args.flightsInput);
         const routesOutput = path.join(outputDir, 'routes_formatted.json');
 
+        log(`Formatting routes from flights input: ${flightsInput}`);
         const formatRoutesArgs = [
             path.join(SCRIPT_DIR, 'formatters', 'flights', 'format_routes_from_flights.py'),
             '--input', flightsInput,
-            '--output', routesOutput
+            '--output', routesOutput,
         ];
-        runCommand('python3', formatRoutesArgs, REPO_ROOT);
+        await runCommand('python3', formatRoutesArgs, REPO_ROOT, commandOptions);
 
         const loadRoutesArgs = [
             path.join(SCRIPT_DIR, 'loaders', 'load_routes.js'),
             '--input', routesOutput,
             '--table', args.routesTable,
-            '--batch-size', String(args.batchSize)
+            '--batch-size', String(args.batchSize),
         ];
         if (args.dbUrl) loadRoutesArgs.push('--db-url', args.dbUrl);
         if (args.replaceExisting) loadRoutesArgs.push('--replace-existing');
         if (args.dryRun) loadRoutesArgs.push('--dry-run');
 
-        runCommand('node', loadRoutesArgs, REPO_ROOT);
+        await runCommand('node', loadRoutesArgs, REPO_ROOT, commandOptions);
         log(`Routes output: ${routesOutput}`);
     }
 
     if (args.includeHotels) {
         if (!args.hotelsBookingInput || !args.hotelsTripadvisorInput) {
-            log("Missing --hotels-booking-input or --hotels-tripadvisor-input required for hotels pipeline.");
+            log('Missing --hotels-booking-input or --hotels-tripadvisor-input required for hotels pipeline.');
             process.exit(2);
         }
 
@@ -243,32 +402,33 @@ function main(argv) {
         const tripadvisorInput = path.resolve(args.hotelsTripadvisorInput);
         const lodgingOutput = path.join(outputDir, 'lodging_formatted.json');
 
+        log(`Formatting lodging from inputs: booking=${bookingInput}, tripadvisor=${tripadvisorInput}`);
         const formatLodgingArgs = [
             path.join(SCRIPT_DIR, 'formatters', 'hotels', 'format_lodging_from_hotels.py'),
             '--booking', bookingInput,
             '--tripadvisor', tripadvisorInput,
-            '--output', lodgingOutput
+            '--output', lodgingOutput,
         ];
-        runCommand('python3', formatLodgingArgs, REPO_ROOT);
+        await runCommand('python3', formatLodgingArgs, REPO_ROOT, commandOptions);
 
         const loadLodgingArgs = [
             path.join(SCRIPT_DIR, 'loaders', 'load_lodging.js'),
             '--input', lodgingOutput,
             '--table', args.lodgingTable,
-            '--batch-size', String(args.batchSize)
+            '--batch-size', String(args.batchSize),
         ];
         if (args.dbUrl) loadLodgingArgs.push('--db-url', args.dbUrl);
         if (args.replaceExisting) loadLodgingArgs.push('--replace-existing');
         if (args.dryRun) loadLodgingArgs.push('--dry-run');
 
-        runCommand('node', loadLodgingArgs, REPO_ROOT);
+        await runCommand('node', loadLodgingArgs, REPO_ROOT, commandOptions);
         log(`Lodging output: ${lodgingOutput}`);
     }
+
+    log('Data pipeline run completed successfully.');
 }
 
-try {
-    main(process.argv.slice(2));
-} catch (error) {
+main(process.argv.slice(2)).catch((error) => {
     process.stderr.write(`${error instanceof Error ? error.message : String(error)}\n`);
     process.exit(1);
-}
+});

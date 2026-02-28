@@ -203,6 +203,11 @@ US_STATE_NAMES = {
 }
 
 
+def log(message: str) -> None:
+    ts = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    print(f"[{ts}] {message}")
+
+
 def normalize_space(value: str | None) -> str | None:
     if value is None:
         return None
@@ -445,6 +450,8 @@ def url_rank(url: str | None) -> tuple[int, int]:
     rank = 0
     if "devpost.com" in host:
         rank -= 2
+    if "devfolio.co" in host:
+        rank -= 2
     if "mlh" in host:
         rank -= 1
     if urlparse(url).path not in {"", "/"}:
@@ -632,7 +639,7 @@ def write_output(records: list[dict[str, Any]], output_path: Path, output_format
     raise ValueError(f"Unsupported output format: {output_format}")
 
 
-def discover_default_inputs(repo_root: Path) -> tuple[list[Path], list[Path]]:
+def discover_default_inputs(repo_root: Path) -> tuple[list[Path], list[Path], list[Path]]:
     mlh_patterns = [
         "MLH-Scraper/mlh*.json",
         "MLH-Scraper/mlh*.csv",
@@ -645,28 +652,39 @@ def discover_default_inputs(repo_root: Path) -> tuple[list[Path], list[Path]]:
         "devpost*.json",
         "devpost*.csv",
     ]
+    devfolio_patterns = [
+        "Devfolio-Scraper/devfolio*.json",
+        "Devfolio-Scraper/devfolio*.csv",
+        "devfolio*.json",
+        "devfolio*.csv",
+    ]
 
     mlh_files: list[Path] = []
     devpost_files: list[Path] = []
+    devfolio_files: list[Path] = []
 
     for pattern in mlh_patterns:
         mlh_files.extend(sorted(repo_root.glob(pattern)))
     for pattern in devpost_patterns:
         devpost_files.extend(sorted(repo_root.glob(pattern)))
+    for pattern in devfolio_patterns:
+        devfolio_files.extend(sorted(repo_root.glob(pattern)))
 
     # Preserve order while removing duplicates.
     mlh_unique = list(dict.fromkeys(path.resolve() for path in mlh_files))
     devpost_unique = list(dict.fromkeys(path.resolve() for path in devpost_files))
-    return mlh_unique, devpost_unique
+    devfolio_unique = list(dict.fromkeys(path.resolve() for path in devfolio_files))
+    return mlh_unique, devpost_unique, devfolio_unique
 
 
 def parse_args(argv: list[str]) -> argparse.Namespace:
     script_dir = Path(__file__).resolve().parent
     parser = argparse.ArgumentParser(
-        description="Clean MLH/Devpost scraped data for Supabase events ingestion."
+        description="Clean MLH/Devpost/Devfolio scraped data for Supabase events ingestion."
     )
     parser.add_argument("--mlh", nargs="*", default=None, help="MLH input files (JSON or CSV)")
     parser.add_argument("--devpost", nargs="*", default=None, help="Devpost input files (JSON or CSV)")
+    parser.add_argument("--devfolio", nargs="*", default=None, help="Devfolio input files (JSON or CSV)")
     parser.add_argument(
         "--output",
         default=str(script_dir / "cleaned_events.json"),
@@ -679,40 +697,62 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
 def main(argv: list[str]) -> int:
     args = parse_args(argv)
     output_path = Path(args.output).expanduser().resolve()
+    log(f"Starting clean_events.py (output={output_path})")
 
     script_dir = Path(__file__).resolve().parent
     repo_root = script_dir.parent
 
-    if args.mlh is None and args.devpost is None:
-        mlh_files, devpost_files = discover_default_inputs(repo_root)
+    if args.mlh is None and args.devpost is None and args.devfolio is None:
+        mlh_files, devpost_files, devfolio_files = discover_default_inputs(repo_root)
+        log(
+            "Auto-discovered input files: "
+            f"mlh={len(mlh_files)}, devpost={len(devpost_files)}, devfolio={len(devfolio_files)}"
+        )
     else:
         mlh_files = [Path(path).expanduser().resolve() for path in (args.mlh or [])]
         devpost_files = [Path(path).expanduser().resolve() for path in (args.devpost or [])]
+        devfolio_files = [Path(path).expanduser().resolve() for path in (args.devfolio or [])]
+        log(
+            "Using explicit input files: "
+            f"mlh={len(mlh_files)}, devpost={len(devpost_files)}, devfolio={len(devfolio_files)}"
+        )
 
-    if not mlh_files and not devpost_files:
+    if not mlh_files and not devpost_files and not devfolio_files:
         print(
-            "No input files found. Provide --mlh/--devpost paths or place scraper outputs in MLH-Scraper/ and Devpost-Scraper/.",
+            (
+                "No input files found. Provide --mlh/--devpost/--devfolio paths or place scraper outputs "
+                "in MLH-Scraper/, Devpost-Scraper/, and Devfolio-Scraper/."
+            ),
             file=sys.stderr,
         )
         return 2
 
     try:
-        records = []
-        records.extend(load_normalized_records(mlh_files, "mlh"))
-        records.extend(load_normalized_records(devpost_files, "devpost"))
+        mlh_records = load_normalized_records(mlh_files, "mlh")
+        devpost_records = load_normalized_records(devpost_files, "devpost")
+        devfolio_records = load_normalized_records(devfolio_files, "devfolio")
+        records = mlh_records + devpost_records + devfolio_records
     except (FileNotFoundError, ValueError, json.JSONDecodeError) as exc:
         print(f"Failed to read input files: {exc}", file=sys.stderr)
         return 1
+
+    log(
+        "Loaded normalized records: "
+        f"mlh={len(mlh_records)}, devpost={len(devpost_records)}, devfolio={len(devfolio_records)}, total={len(records)}"
+    )
 
     if not records:
         print("No valid records found in input files.", file=sys.stderr)
         return 1
 
+    pre_dedupe_count = len(records)
     merged = merge_by_url(records)
     merged = merge_by_name_start(merged)
+    log(f"Merged records after dedupe: {len(merged)} (from {pre_dedupe_count})")
 
     merged.sort(key=lambda row: ((row.get("start_datetime_utc") or ""), (row.get("name") or "").casefold()))
     cleaned = strip_internal_fields(merged)
+    log(f"Final cleaned records (in-person only): {len(cleaned)}")
 
     output_format = infer_output_format(output_path, args.format)
     write_output(cleaned, output_path, output_format)

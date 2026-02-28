@@ -19,6 +19,7 @@ import json
 import re
 import sys
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Iterable
 
@@ -52,6 +53,11 @@ MANUAL_CITY_ALIASES: dict[str, str] = {
     "bophut": "Bophut",
     "mae nam": "Mae Nam",
 }
+
+
+def log(message: str) -> None:
+    ts = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    print(f"[{ts}] {message}")
 
 
 @dataclass
@@ -308,6 +314,10 @@ def main(argv: list[str]) -> int:
     booking_path = Path(args.booking).expanduser().resolve()
     tripadvisor_path = Path(args.tripadvisor).expanduser().resolve()
     output_path = Path(args.output).expanduser().resolve()
+    log(
+        "Starting lodging formatter "
+        f"(booking={booking_path}, tripadvisor={tripadvisor_path}, output={output_path})"
+    )
 
     if not booking_path.exists():
         print(f"Booking file not found: {booking_path}", file=sys.stderr)
@@ -321,18 +331,22 @@ def main(argv: list[str]) -> int:
     except Exception as exc:
         print(f"Failed reading booking file: {exc}", file=sys.stderr)
         return 1
+    log(f"Booking rows kept={len(booking_rows)}, skipped={skipped_booking}")
 
     booking_cities = [city for city, _rate in booking_rows]
     alias_map = build_city_alias_map(booking_cities)
+    log(f"Built city alias map with {len(alias_map)} entries")
 
     try:
         trip_rows, skipped_tripadvisor = read_tripadvisor_rows(tripadvisor_path, alias_map)
     except Exception as exc:
         print(f"Failed reading tripadvisor file: {exc}", file=sys.stderr)
         return 1
+    log(f"Tripadvisor rows kept={len(trip_rows)}, skipped={skipped_tripadvisor}")
 
     combined = booking_rows + trip_rows
     aggregated = aggregate_city_rates(combined)
+    log(f"Aggregated lodging rows by city: {len(aggregated)}")
 
     if not aggregated:
         print("No lodging rows generated.", file=sys.stderr)

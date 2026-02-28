@@ -26,7 +26,7 @@ function checkAuth(req, res, next) {
 
 /**
  * POST /api/admin/sync-events
- * Triggers the data pipeline orchestrator asynchronously to re-scrape MLH & Devpost events.
+ * Triggers the data pipeline orchestrator asynchronously to re-scrape events.
  */
 router.post('/sync-events', checkAuth, (req, res) => {
     console.log('Admin triggered an asynchronous event data sync.');
@@ -36,7 +36,7 @@ router.post('/sync-events', checkAuth, (req, res) => {
 
     const args = [
         pipelineScript,
-        // By default, this will scrape MLH & Devpost and load them into events.
+        // By default, this scrapes MLH + Devpost + Devfolio and loads into events.
         // Ensure flights and hotels aren't automatically pulled. (It only does if --include-xyz is passed).
     ];
 

@@ -8,8 +8,12 @@ const dotenv = require('dotenv');
 const SCRIPT_DIR = __dirname;
 const REPO_ROOT = path.resolve(SCRIPT_DIR, '..');
 
+function timestamp() {
+  return new Date().toISOString();
+}
+
 function log(message) {
-  process.stdout.write(`${message}\n`);
+  process.stdout.write(`[${timestamp()}] ${message}\n`);
 }
 
 function loadEnvFiles() {
@@ -173,8 +177,10 @@ async function insertBatch(client, table, rows) {
 
 async function insertRows(client, table, rows, batchSize) {
   let inserted = 0;
-  for (let i = 0; i < rows.length; i += batchSize) {
+  const totalBatches = Math.max(1, Math.ceil(rows.length / batchSize));
+  for (let i = 0, batchNumber = 1; i < rows.length; i += batchSize, batchNumber += 1) {
     const chunk = rows.slice(i, i + batchSize);
+    log(`Upserting routes batch ${batchNumber}/${totalBatches} (${chunk.length} rows)...`);
     inserted += await insertBatch(client, table, chunk);
   }
   return inserted;
@@ -183,9 +189,11 @@ async function insertRows(client, table, rows, batchSize) {
 async function main() {
   loadEnvFiles();
   const args = parseArgs(process.argv.slice(2));
+  log(`Starting routes load: table=${args.table}, batch_size=${args.batchSize}`);
 
   const inputPath = path.resolve(args.input);
   const table = validateTableName(args.table);
+  log(`Reading routes input from ${inputPath}`);
   const cleanedRows = await readCleanedRows(inputPath);
 
   log(`Cleaned rows ready: ${cleanedRows.length}`);
@@ -201,7 +209,9 @@ async function main() {
   }
 
   const client = new Client({ connectionString: dbUrl });
+  log(`Connecting to database for table '${table}'...`);
   await client.connect();
+  log('Database connection established.');
 
   let inserted = 0;
 
@@ -214,6 +224,7 @@ async function main() {
     }
 
     const { rowsToInsert } = prepareInsertRows(cleanedRows);
+    log(`Rows prepared for upsert: ${rowsToInsert.length}`);
     inserted = await insertRows(client, table, rowsToInsert, args.batchSize);
 
     await client.query('COMMIT');
