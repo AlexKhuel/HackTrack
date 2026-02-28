@@ -1,159 +1,355 @@
 import { useEffect, useMemo, useState } from "react"
+import {
+  inferAirportMetadataFromCodes,
+  inferBrowserCountry,
+  inferBrowserTimezone,
+  normalizeAirportCode,
+} from "../utils/airportMetadata"
+import {
+  localTimeToUtc,
+  normalizeNonNegativeInteger,
+  utcTimeToLocalInput,
+} from "../utils/classTimes"
 
 const FIELD_INPUT =
   "w-full bg-[rgba(245,237,214,0.07)] border border-[rgba(0,200,180,0.18)] rounded-[6px] px-4 py-3 text-[var(--cream)] placeholder:text-[rgba(245,237,214,0.3)] outline-none focus:border-[var(--teal)] font-['Syne',sans-serif]"
 const FIELD_LABEL =
-  "mb-2 text-xs font-semibold uppercase tracking-[0.25em] text-[var(--muted)] font-['Space_Mono',monospace]"
-const TIMEZONE_OPTIONS = [
-  "America/Los_Angeles",
-  "America/Denver",
-  "America/Chicago",
-  "America/New_York",
-  "America/Phoenix",
-  "America/Anchorage",
-  "Pacific/Honolulu",
-]
+  "mb-2 text-xs font-semibold uppercase tracking-[0.25em] text-[var(--muted)] font-['Space_Mono',monospace] md:whitespace-nowrap"
 
-function normalizeAirport(code) {
-  return (code ?? "").toString().trim().toUpperCase().slice(0, 3)
+function toFriendCitiesText(value) {
+  if (Array.isArray(value)) {
+    return value
+      .map((entry) => (entry ?? "").toString().trim())
+      .filter(Boolean)
+      .join(", ")
+  }
+  return (value ?? "").toString()
+}
+
+function parseFriendCities(text) {
+  const seen = new Set()
+  const cities = []
+  for (const raw of (text ?? "").toString().split(",")) {
+    const city = raw.trim()
+    if (!city) continue
+    const key = city.toLowerCase()
+    if (seen.has(key)) continue
+    seen.add(key)
+    cities.push(city)
+  }
+  return cities
+}
+
+function minutesToHoursInput(value, fallbackMinutes = 1000) {
+  const parsed = Number(value)
+  const minutes = Number.isFinite(parsed) && parsed >= 0 ? parsed : fallbackMinutes
+  const hours = minutes / 60
+  const rounded = Math.round(hours * 10) / 10
+  return String(rounded)
+}
+
+function hoursInputToMinutes(value, fallbackMinutes = 1000) {
+  const parsed = Number(value)
+  if (!Number.isFinite(parsed) || parsed < 0) return fallbackMinutes
+  return Math.round(parsed * 60)
+}
+
+function timezoneSourceLabel(timezoneSource) {
+  if ((timezoneSource ?? "").startsWith("airport:")) {
+    const code = timezoneSource.split(":")[1] || "airport"
+    return `Inferred from airport (${code}).`
+  }
+  if (timezoneSource === "browser") {
+    return "Inferred from browser."
+  }
+  return ""
+}
+
+function countrySourceLabel(countrySource) {
+  if ((countrySource ?? "").startsWith("airport:")) {
+    const code = countrySource.split(":")[1] || "airport"
+    return `Inferred from airport (${code}).`
+  }
+  if (countrySource === "browser") {
+    return "Inferred from browser."
+  }
+  return ""
+}
+
+function formStateFromInitial(initialValues) {
+  const primaryAirport = normalizeAirportCode(initialValues?.primary_airport_code)
+  const secondaryAirport = normalizeAirportCode(initialValues?.secondary_airport_code)
+  const tertiaryAirport = normalizeAirportCode(initialValues?.tertiary_airport_code)
+  const inferredFromAirports = inferAirportMetadataFromCodes([
+    primaryAirport,
+    secondaryAirport,
+    tertiaryAirport,
+  ])
+  const browserTimezone = inferBrowserTimezone()
+  const timezone =
+    (initialValues?.timezone ?? "").toString().trim() ||
+    inferredFromAirports.timezone ||
+    browserTimezone
+
+  const next = {
+    name: "",
+    primary_airport_code: "",
+    secondary_airport_code: "",
+    tertiary_airport_code: "",
+    max_cost: "1000",
+    max_time: "1000",
+    friday_last_class: "",
+    monday_first_class: "",
+    friend_cities: "",
+  }
+
+  if (initialValues && typeof initialValues === "object") {
+    Object.assign(next, initialValues)
+  }
+
+  next.name = (initialValues?.name ?? "").toString()
+  next.primary_airport_code = primaryAirport
+  next.secondary_airport_code = secondaryAirport
+  next.tertiary_airport_code = tertiaryAirport
+  next.max_cost = String(normalizeNonNegativeInteger(initialValues?.max_cost, 1000))
+  next.max_time = minutesToHoursInput(initialValues?.max_time, 1000)
+  next.friday_last_class = utcTimeToLocalInput(initialValues?.friday_last_class, timezone)
+  next.monday_first_class = utcTimeToLocalInput(initialValues?.monday_first_class, timezone)
+  next.friend_cities = toFriendCitiesText(initialValues?.friend_cities)
+
+  return next
 }
 
 export default function InputForm({ initialValues, onSubmit }) {
-  const [values, setValues] = useState(() => ({
-    home_airport: "",
-    home_timezone: "America/Los_Angeles",
-    fri_last_class_end: "",
-    mon_first_class_start: "",
-    weekend_budget: "",
-    date_from: "",
-    date_to: "",
-    friend_cities: "",
-    ...(initialValues ?? {}),
-  }))
+  const [values, setValues] = useState(() => formStateFromInitial(initialValues))
+  const [errorText, setErrorText] = useState("")
 
   useEffect(() => {
     if (!initialValues) return
-    setValues((v) => ({ ...v, ...initialValues }))
+    setValues(formStateFromInitial(initialValues))
   }, [initialValues])
 
-  const parsed = useMemo(() => {
-    const budget = Number(values.weekend_budget)
+  const inferred = useMemo(() => {
+    const inferredFromAirports = inferAirportMetadataFromCodes([
+      values.primary_airport_code,
+      values.secondary_airport_code,
+      values.tertiary_airport_code,
+    ])
+    const browserTimezone = inferBrowserTimezone()
+    const browserCountry = inferBrowserCountry()
+
+    const timezone = inferredFromAirports.timezone || browserTimezone || ""
+    const country = inferredFromAirports.country || browserCountry || ""
+    const timezoneSource = inferredFromAirports.timezone
+      ? `airport:${inferredFromAirports.airport_code}`
+      : browserTimezone ? "browser" : ""
+    const countrySource = inferredFromAirports.country
+      ? `airport:${inferredFromAirports.airport_code}`
+      : browserCountry ? "browser" : ""
+
     return {
-      ...values,
-      home_airport: normalizeAirport(values.home_airport),
-      weekend_budget: Number.isFinite(budget) ? String(budget) : "",
-      friend_cities: (values.friend_cities ?? "").toString(),
+      ...inferredFromAirports,
+      timezone,
+      country,
+      timezone_source: timezoneSource,
+      country_source: countrySource,
     }
-  }, [values])
+  }, [values.primary_airport_code, values.secondary_airport_code, values.tertiary_airport_code])
+
+  const parsed = useMemo(() => {
+    return {
+      name: values.name.trim(),
+      timezone: inferred.timezone,
+      country: inferred.country,
+      primary_airport_code: normalizeAirportCode(values.primary_airport_code),
+      secondary_airport_code: normalizeAirportCode(values.secondary_airport_code),
+      tertiary_airport_code: normalizeAirportCode(values.tertiary_airport_code),
+      max_cost: normalizeNonNegativeInteger(values.max_cost, 1000),
+      max_time: hoursInputToMinutes(values.max_time, 1000),
+      friday_last_class: localTimeToUtc(values.friday_last_class, inferred.timezone),
+      monday_first_class: localTimeToUtc(values.monday_first_class, inferred.timezone),
+      friend_cities: parseFriendCities(values.friend_cities),
+    }
+  }, [values, inferred])
 
   const update = (key) => (e) => {
     setValues((v) => ({ ...v, [key]: e.target.value }))
+    setErrorText("")
+  }
+  const updateAirport = (key) => (e) => {
+    setValues((v) => ({ ...v, [key]: e.target.value.toUpperCase() }))
+    setErrorText("")
   }
 
   const handleSubmit = (e) => {
     e.preventDefault()
+    const hasClassTimes = Boolean(values.friday_last_class || values.monday_first_class)
+    if (hasClassTimes && !inferred.timezone) {
+      setErrorText("Could not infer timezone from your airport codes, so class times cannot be converted to UTC.")
+      return
+    }
+    setErrorText("")
     onSubmit?.(parsed)
   }
 
   return (
-    <form onSubmit={handleSubmit} className="w-full max-w-3xl font-['Syne',sans-serif]">
+    <form onSubmit={handleSubmit} className="w-full max-w-none font-['Syne',sans-serif]">
       <div
         className="section-label"
         style={{ textAlign: "left", marginBottom: "0.75rem" }}
       >
-        Your Preferences
+        User Profile
       </div>
       <div className="mt-6 grid gap-10">
         <div className="grid gap-8 sm:grid-cols-2">
           <label className="block">
-            <div className={FIELD_LABEL}>Home airport code</div>
+            <div className={FIELD_LABEL}>Name</div>
             <input
-              value={values.home_airport}
-              onChange={update("home_airport")}
-              placeholder="SNA"
+              value={values.name}
+              onChange={update("name")}
+              placeholder="Ada Lovelace"
               inputMode="text"
               className={FIELD_INPUT}
+            />
+          </label>
+
+          <label className="block">
+            <div className={FIELD_LABEL}>Primary airport code</div>
+            <input
+              value={values.primary_airport_code}
+              onChange={updateAirport("primary_airport_code")}
+              placeholder="LAX"
+              inputMode="text"
+              className={FIELD_INPUT}
+              maxLength={3}
+              pattern="[A-Za-z]{3}"
               required
             />
           </label>
 
           <label className="block">
-            <div className={FIELD_LABEL}>Total weekend budget (USD)</div>
+            <div className={FIELD_LABEL}>Secondary airport code (optional)</div>
+            <input
+              value={values.secondary_airport_code}
+              onChange={updateAirport("secondary_airport_code")}
+              placeholder="SNA"
+              inputMode="text"
+              className={FIELD_INPUT}
+              maxLength={3}
+              pattern="[A-Za-z]{3}"
+            />
+          </label>
+
+          <label className="block">
+            <div className={FIELD_LABEL}>Tertiary airport code (optional)</div>
+            <input
+              value={values.tertiary_airport_code}
+              onChange={updateAirport("tertiary_airport_code")}
+              placeholder="LGB"
+              inputMode="text"
+              className={FIELD_INPUT}
+              maxLength={3}
+              pattern="[A-Za-z]{3}"
+            />
+          </label>
+        </div>
+
+        <div className="grid gap-8 sm:grid-cols-2">
+          <label className="block">
+            <div className={FIELD_LABEL}>Max cost (USD)</div>
             <input
               type="number"
               min="0"
               step="1"
-              value={values.weekend_budget}
-              onChange={update("weekend_budget")}
-              placeholder="500"
+              value={values.max_cost}
+              onChange={update("max_cost")}
+              placeholder="1000"
               className={FIELD_INPUT}
               required
             />
           </label>
 
           <label className="block">
-            <div className={FIELD_LABEL}>Friday last class end time</div>
+            <div className={FIELD_LABEL}>Max travel time (hours)</div>
             <input
-              type="time"
-              value={values.fri_last_class_end}
-              onChange={update("fri_last_class_end")}
-              className={FIELD_INPUT}
-              required
-            />
-          </label>
-
-          <label className="block">
-            <div className={FIELD_LABEL}>Monday first class start time</div>
-            <input
-              type="time"
-              value={values.mon_first_class_start}
-              onChange={update("mon_first_class_start")}
-              className={FIELD_INPUT}
-              required
-            />
-          </label>
-
-          <label className="block">
-            <div className={FIELD_LABEL}>Date range (from)</div>
-            <input
-              type="date"
-              value={values.date_from}
-              onChange={update("date_from")}
-              className={FIELD_INPUT}
-              required
-            />
-          </label>
-
-          <label className="block">
-            <div className={FIELD_LABEL}>Date range (to)</div>
-            <input
-              type="date"
-              value={values.date_to}
-              onChange={update("date_to")}
+              type="number"
+              min="0"
+              step="0.5"
+              value={values.max_time}
+              onChange={update("max_time")}
+              placeholder="16"
               className={FIELD_INPUT}
               required
             />
           </label>
         </div>
 
-        <label className="block sm:max-w-[26rem]">
-          <div className={FIELD_LABEL}>Home time zone</div>
-          <select
-            value={values.home_timezone}
-            onChange={update("home_timezone")}
-            className={FIELD_INPUT}
-            required
-          >
-            {TIMEZONE_OPTIONS.map((tz) => (
-              <option key={tz} value={tz}>
-                {tz}
-              </option>
-            ))}
-          </select>
-        </label>
+        <div className="grid gap-8 sm:grid-cols-2">
+          <label className="block">
+            <div className={FIELD_LABEL}>Friday last class (local, optional)</div>
+            <input
+              type="time"
+              value={values.friday_last_class}
+              onChange={update("friday_last_class")}
+              className={FIELD_INPUT}
+            />
+            <div className="mt-2 text-xs text-[var(--muted)] font-['Space_Mono',monospace]">
+              Leave blank to skip Friday class constraints.
+            </div>
+          </label>
+
+          <label className="block">
+            <div className={FIELD_LABEL}>Monday first class (local, optional)</div>
+            <input
+              type="time"
+              value={values.monday_first_class}
+              onChange={update("monday_first_class")}
+              className={FIELD_INPUT}
+            />
+            <div className="mt-2 text-xs text-[var(--muted)] font-['Space_Mono',monospace]">
+              Leave blank to skip Monday class constraints.
+            </div>
+          </label>
+        </div>
+
+        {errorText ? (
+          <div className="text-xs text-[#e4032e] font-['Space_Mono',monospace]">
+            {errorText}
+          </div>
+        ) : null}
+
+        <div className="grid gap-8 sm:grid-cols-2">
+          <label className="block">
+            <div className={FIELD_LABEL}>Timezone</div>
+            <input
+              value={inferred.timezone || "Unknown for this airport"}
+              className={FIELD_INPUT}
+              readOnly
+            />
+            {timezoneSourceLabel(inferred.timezone_source) ? (
+              <div className="mt-2 text-xs text-[var(--muted)] font-['Space_Mono',monospace]">
+                {timezoneSourceLabel(inferred.timezone_source)}
+              </div>
+            ) : null}
+          </label>
+
+          <label className="block">
+            <div className={FIELD_LABEL}>Country</div>
+            <input
+              value={inferred.country || "Unknown"}
+              className={FIELD_INPUT}
+              readOnly
+            />
+            {countrySourceLabel(inferred.country_source) ? (
+              <div className="mt-2 text-xs text-[var(--muted)] font-['Space_Mono',monospace]">
+                {countrySourceLabel(inferred.country_source)}
+              </div>
+            ) : null}
+          </label>
+        </div>
 
         <label className="block">
-          <div className={FIELD_LABEL}>Friend cities (optional, comma separated)</div>
+          <div className={FIELD_LABEL}>Friend cities (comma separated)</div>
           <input
             value={values.friend_cities}
             onChange={update("friend_cities")}

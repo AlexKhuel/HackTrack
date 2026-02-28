@@ -4,16 +4,50 @@ import NavBar from "./components/NavBar"
 import InputForm from "./components/InputForm"
 import ResultsList from "./components/ResultsList"
 import BackgroundScene from "./components/BackgroundScene"
+import {
+  inferAirportMetadataFromCodes,
+  inferBrowserCountry,
+  inferBrowserTimezone,
+  normalizeAirportCode,
+} from "./utils/airportMetadata"
 
 const DEFAULT_FORM = {
-  home_airport: "",
-  home_timezone: "America/Los_Angeles",
-  fri_last_class_end: "",
-  mon_first_class_start: "",
-  weekend_budget: "",
-  date_from: "",
-  date_to: "",
-  friend_cities: "",
+  name: "",
+  timezone: "",
+  country: "",
+  primary_airport_code: "",
+  secondary_airport_code: "",
+  tertiary_airport_code: "",
+  max_cost: "1000",
+  max_time: "1000",
+  friday_last_class: "",
+  monday_first_class: "",
+  friend_cities: [],
+}
+
+function parseFriendCities(raw) {
+  if (Array.isArray(raw)) {
+    return raw
+      .map((entry) => (entry ?? "").toString().trim())
+      .filter(Boolean)
+  }
+
+  const text = (raw ?? "").toString().trim()
+  if (!text) return []
+
+  if (text.startsWith("[") && text.endsWith("]")) {
+    try {
+      const parsed = JSON.parse(text)
+      if (Array.isArray(parsed)) return parseFriendCities(parsed)
+    } catch {
+      // Fall back to comma parsing.
+    }
+  }
+
+  return text
+    .split(",")
+    .map((entry) => entry.trim())
+    .filter(Boolean)
 }
 
 function parseFormFromSearch(search) {
@@ -22,18 +56,37 @@ function parseFormFromSearch(search) {
   const view = rawView === "results" ? "results" : rawView === "form" ? "form" : "home"
 
   const pick = (key) => (params.get(key) ?? "").toString()
+  const primaryAirportCode = normalizeAirportCode(pick("primary_airport_code"))
+  const secondaryAirportCode = normalizeAirportCode(pick("secondary_airport_code"))
+  const tertiaryAirportCode = normalizeAirportCode(pick("tertiary_airport_code"))
+  const inferred = inferAirportMetadataFromCodes([
+    primaryAirportCode,
+    secondaryAirportCode,
+    tertiaryAirportCode,
+  ])
+  const timezone = pick("timezone") || inferred.timezone || inferBrowserTimezone()
+  const country = pick("country") || inferred.country || inferBrowserCountry()
+
   const form = {
-    home_airport: pick("home_airport"),
-    home_timezone: pick("home_timezone") || "America/Los_Angeles",
-    fri_last_class_end: pick("fri_last_class_end"),
-    mon_first_class_start: pick("mon_first_class_start"),
-    weekend_budget: pick("weekend_budget"),
-    date_from: pick("date_from"),
-    date_to: pick("date_to"),
-    friend_cities: pick("friend_cities"),
+    name: pick("name"),
+    timezone,
+    country,
+    primary_airport_code: primaryAirportCode,
+    secondary_airport_code: secondaryAirportCode,
+    tertiary_airport_code: tertiaryAirportCode,
+    max_cost: pick("max_cost") || "1000",
+    max_time: pick("max_time") || "1000",
+    friday_last_class: pick("friday_last_class"),
+    monday_first_class: pick("monday_first_class"),
+    friend_cities: parseFriendCities(pick("friend_cities")),
   }
 
   return { view, form }
+}
+
+function serializeQueryValue(value) {
+  if (Array.isArray(value)) return value.join(",")
+  return (value ?? "").toString().trim()
 }
 
 function setSearchFromForm({ view, form }) {
@@ -41,7 +94,7 @@ function setSearchFromForm({ view, form }) {
   params.set("view", view)
 
   for (const [k, v] of Object.entries(form ?? {})) {
-    const value = (v ?? "").toString().trim()
+    const value = serializeQueryValue(v)
     if (value) params.set(k, value)
   }
 

@@ -28,11 +28,29 @@ function formatDateRange(fromISO, toISO) {
 }
 
 function splitFriendCities(text) {
+  if (Array.isArray(text)) {
+    return text
+      .map((entry) => (entry ?? "").toString().trim())
+      .filter(Boolean)
+  }
   return (text ?? "")
     .toString()
     .split(",")
     .map((s) => s.trim())
     .filter(Boolean)
+}
+
+function showClassConstraint(value) {
+  const text = (value ?? "").toString().trim()
+  return text || "none"
+}
+
+function showMaxTravelTimeHours(value) {
+  const minutes = Number(value)
+  if (!Number.isFinite(minutes) || minutes < 0) return "16.7h"
+  const hours = minutes / 60
+  const rounded = Math.round(hours * 10) / 10
+  return `${rounded}h`
 }
 
 const MOCK_HACKATHONS = [
@@ -202,8 +220,11 @@ export default function ResultsList({ formData }) {
           </div>
 
           <div className="text-xs font-semibold uppercase tracking-[0.25em] text-[rgba(245,237,214,0.4)] font-['Space_Mono',monospace]">
-            {formData?.home_airport ? formData.home_airport : "—"} •{" "}
-            {formatDateRange(formData?.date_from, formData?.date_to)} •{" "}
+            {formData?.primary_airport_code ? formData.primary_airport_code : "—"} •{" "}
+            {formData?.timezone || "Timezone unknown"} •{" "}
+            {formData?.country || "Country unknown"} •{" "}
+            Max ${formData?.max_cost ?? "1000"} / {showMaxTravelTimeHours(formData?.max_time)} •{" "}
+            Fri {showClassConstraint(formData?.friday_last_class)} • Mon {showClassConstraint(formData?.monday_first_class)} •{" "}
             {friends.length ? `Friends: ${friends.join(", ")}` : "No friend cities"}
           </div>
         </div>
