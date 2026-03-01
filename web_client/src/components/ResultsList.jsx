@@ -651,7 +651,6 @@ export default function ResultsList({
                 <div className="score-demo-wrap">
                     <SkeletonCard />
                     <SkeletonCard />
-                    <SkeletonCard />
                 </div>
             ) : null}
 

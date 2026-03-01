@@ -420,8 +420,21 @@ nav ul a:hover { color: var(--teal); }
   justify-content: flex-start;
 }
 
+@keyframes btnShimmer {
+  0%   { background-position: -200% center; }
+  100% { background-position: 200% center; }
+}
 .btn-primary {
-  background: linear-gradient(135deg, var(--ember), #e85d2f);
+  background: linear-gradient(
+    105deg,
+    var(--ember) 0%,
+    #e85d2f 40%,
+    rgba(255,255,255,0.28) 50%,
+    #e85d2f 60%,
+    var(--ember) 100%
+  );
+  background-size: 200% auto;
+  animation: btnShimmer 2.8s linear infinite;
   color: #fff;
   padding: 0.9rem 2.2rem;
   border: none;
