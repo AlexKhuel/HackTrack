@@ -45,10 +45,10 @@ def prize_to_hotel_cost_score(feasible_events):
     )
     print(df.columns)
 
-    # Compute nights of event
+    # Compute nights of event (normalize to midnight so partial last-day hours don't truncate)
     df["nights"] = (
-        pd.to_datetime(df["end_datetime_utc"]) -
-        pd.to_datetime(df["start_datetime_utc"])
+        pd.to_datetime(df["end_datetime_utc"]).dt.normalize() -
+        pd.to_datetime(df["start_datetime_utc"]).dt.normalize()
     ).dt.days
     #Some cities have no lodging info, we can impute the hotel cost with the average cost per night across all cities
     df["avg_cost_per_night"] = df["nightly_rate_x"].fillna(
@@ -149,10 +149,10 @@ def scored(max_cost, max_time, origin_airports = None, friend_cities=None):
         how="left"
     )
 
-    # Compute nights of event
+    # Compute nights of event (normalize to midnight so partial last-day hours don't truncate)
     df["nights"] = (
-        pd.to_datetime(df["end_datetime_utc"]) -
-        pd.to_datetime(df["start_datetime_utc"])
+        pd.to_datetime(df["end_datetime_utc"]).dt.normalize() -
+        pd.to_datetime(df["start_datetime_utc"]).dt.normalize()
     ).dt.days
     #Some cities have no lodging info, we can impute the hotel cost with the average cost per night across all cities
     df["avg_cost_per_night"] = df["nightly_rate"]
