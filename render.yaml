@@ -21,11 +21,10 @@ services:
     staticPublishPath: web_client/dist
     routes:
       - type: rewrite
-        source: /api/*
-        destination: https://irvine-hacks-api.onrender.com/api/*
-      - type: rewrite
         source: /*
         destination: /index.html
     envVars:
       - key: NODE_VERSION
         value: 20
+      - key: VITE_API_BASE_URL
+        value: https://irvine-hacks-api.onrender.com

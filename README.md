@@ -174,6 +174,14 @@ npm --prefix api_services test
 npm --prefix web_client run build
 ```
 
+## Render Deployment Notes
+
+For Render production deploys, configure the web client to call the API service directly:
+
+- `VITE_API_BASE_URL=https://irvine-hacks-api.onrender.com` on the static web service.
+- Keep SPA fallback rewrite (`/* -> /index.html`) on the web service.
+- Do not rely on a static-site `/api/*` rewrite to an external URL.
+
 ## Windows Proxy Troubleshooting
 
 If `npm --prefix web_client run dev` logs a Vite proxy error like `read ECONNRESET` for `/api/...`, the frontend is reachable but the API target is not.
