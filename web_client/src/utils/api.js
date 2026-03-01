@@ -287,6 +287,7 @@ async function fetchFeasibleHackathons(formData, options = {}) {
   const budget = toPositiveNumber(formData?.max_cost) ?? DEFAULT_BUDGET
   params.set("budget", String(budget))
   params.set("user_timezone", userTimezone)
+  params.set("include_lodging", "true")
   if (fridayLastClassEnd) {
     params.set("friday_last_class_end", fridayLastClassEnd)
   }

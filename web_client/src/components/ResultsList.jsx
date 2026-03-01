@@ -150,6 +150,9 @@ function mapFeasibleResult(result, index) {
     const estimatedFlightCost = toFiniteNumberOrNull(
         costEstimate?.estimated_flight_cost,
     );
+    const estimatedLodgingCost = toFiniteNumberOrNull(
+        costEstimate?.estimated_lodging_cost,
+    );
     const prizePool = toFiniteNumberOrNull(event?.prize_pool);
 
     return {
@@ -161,6 +164,9 @@ function mapFeasibleResult(result, index) {
         estimated_cost: Number.isFinite(estimatedCost) ? estimatedCost : null,
         estimated_flight_cost: Number.isFinite(estimatedFlightCost)
             ? estimatedFlightCost
+            : null,
+        estimated_lodging_cost: Number.isFinite(estimatedLodgingCost)
+            ? estimatedLodgingCost
             : null,
         travel_time_hours: Number.isFinite(totalTravelMinutes)
             ? totalTravelMinutes / 60
@@ -440,6 +446,12 @@ export default function ResultsList({ formData }) {
                             h.travel_time_hours,
                         );
                         const isFriendNearby = friendScore > 0;
+                        const totalCostLabel = formatUSD(h.estimated_cost);
+                        const flightCostLabel = formatUSD(h.estimated_flight_cost);
+                        const lodgingCostLabel = formatUSD(h.estimated_lodging_cost);
+                        const hasCostBreakdown =
+                            Number.isFinite(h.estimated_flight_cost) ||
+                            Number.isFinite(h.estimated_lodging_cost);
                         return (
                             <article key={h.id} className="demo-card">
                                 <div className="demo-card-header">
@@ -524,7 +536,12 @@ export default function ResultsList({ formData }) {
                                         <div className="meta-label">
                                             Est Cost
                                         </div>
-                                        <div className="meta-value gold">{`${formatUSD(h.estimated_flight_cost ?? h.estimated_cost)} round trip`}</div>
+                                        <div className="meta-value gold">{`${totalCostLabel} total`}</div>
+                                        {hasCostBreakdown ? (
+                                            <div className="meta-subvalue">
+                                                {`Flight ${flightCostLabel} + Lodging ${lodgingCostLabel}`}
+                                            </div>
+                                        ) : null}
                                     </div>
                                     <div className="meta-item">
                                         <div className="meta-label">Travel</div>

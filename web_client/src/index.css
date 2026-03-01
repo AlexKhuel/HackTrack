@@ -788,6 +788,13 @@ section {
 .meta-value { color: var(--cream); font-weight: 600; margin-top: 2px; }
 .meta-value.green { color: var(--teal); }
 .meta-value.gold { color: var(--gold); }
+.meta-subvalue {
+  margin-top: 4px;
+  color: var(--muted);
+  font-size: 0.7rem;
+  line-height: 1.35;
+  font-family: 'Space Mono', monospace;
+}
 
 /* CTA SECTION */
 #cta {
@@ -859,6 +866,37 @@ section {
   font-size: 0.65rem;
   color: var(--cream);
   letter-spacing: 0.1em;
+}
+
+.time-input-row {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  min-width: 0;
+}
+
+.time-input {
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+  min-inline-size: 0;
+  flex: 1 1 auto;
+}
+
+.time-input::-webkit-datetime-edit {
+  min-width: 0;
+  padding: 0;
+}
+
+.time-input::-webkit-date-and-time-value {
+  min-width: 0;
+  text-align: left;
+}
+
+@supports (-webkit-touch-callout: none) {
+  .time-input {
+    font-size: 16px;
+  }
 }
 
 /* FOOTER */
@@ -1015,6 +1053,10 @@ footer .logo { font-size: 1rem; }
   .early-form .btn-primary {
     width: 100%;
     min-width: 0;
+  }
+
+  .time-input-row {
+    gap: 0.5rem;
   }
 
   .scroll-down {

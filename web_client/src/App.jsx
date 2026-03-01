@@ -11,8 +11,6 @@ import GoogleSignInPage from "./components/GoogleSignInPage"
 import {
   clearStoredSessionToken,
   fetchLatestUserInput,
-  fetchSessionUser,
-  getStoredSessionToken,
   saveUserInput,
   setStoredSessionToken,
   signInWithGoogleCredential,
@@ -165,14 +163,11 @@ function normalizeSavedInput(rawInput) {
 export default function App() {
   const initial = useMemo(() => parseFormFromSearch(window.location.search), [])
   const hasQueryBackedFormValues = useMemo(() => hasExplicitFormParams(window.location.search), [])
-  const initialStoredToken = useMemo(() => getStoredSessionToken(), [])
   const [view, setView] = useState(initial.view)
   const [form, setForm] = useState({ ...DEFAULT_FORM, ...initial.form })
 
-  const [authStatus, setAuthStatus] = useState(
-    initialStoredToken ? AUTH_STATUS.CHECKING : AUTH_STATUS.SIGNED_OUT
-  )
-  const [sessionToken, setSessionToken] = useState(initialStoredToken)
+  const [authStatus, setAuthStatus] = useState(AUTH_STATUS.SIGNED_OUT)
+  const [sessionToken, setSessionToken] = useState("")
   const [sessionUser, setSessionUser] = useState(null)
   const [authError, setAuthError] = useState("")
   const [isAuthBusy, setIsAuthBusy] = useState(false)
@@ -193,33 +188,6 @@ export default function App() {
 
     void configureStatusBar()
   }, [])
-
-  useEffect(() => {
-    let cancelled = false
-    const token = initialStoredToken
-    if (!token) return
-
-    const loadExistingSession = async () => {
-      try {
-        const payload = await fetchSessionUser(token)
-        if (cancelled) return
-        setSessionToken(token)
-        setSessionUser(payload.user ?? null)
-        setAuthStatus(AUTH_STATUS.SIGNED_IN)
-      } catch {
-        clearStoredSessionToken()
-        if (cancelled) return
-        setSessionToken("")
-        setSessionUser(null)
-        setAuthStatus(AUTH_STATUS.SIGNED_OUT)
-      }
-    }
-
-    void loadExistingSession()
-    return () => {
-      cancelled = true
-    }
-  }, [initialStoredToken])
 
   useEffect(() => {
     const onPopState = () => {

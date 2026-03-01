@@ -11,6 +11,8 @@ const FIELD_INPUT =
     "w-full bg-[rgba(245,237,214,0.07)] border border-[rgba(0,200,180,0.18)] rounded-[6px] px-4 py-3 text-[var(--cream)] placeholder:text-[rgba(245,237,214,0.3)] outline-none focus:border-[var(--teal)] font-['Syne',sans-serif]";
 const FIELD_LABEL =
     "mb-2 text-xs font-semibold uppercase tracking-[0.25em] text-[var(--muted)] font-['Space_Mono',monospace] md:whitespace-nowrap";
+const TIME_CLEAR_BUTTON =
+    "shrink-0 rounded-[6px] border border-[rgba(0,200,180,0.18)] px-3 py-3 text-[0.7rem] font-semibold uppercase tracking-[0.15em] text-[var(--teal)] transition-colors hover:border-[var(--teal)] hover:bg-[rgba(0,229,204,0.08)] disabled:cursor-not-allowed disabled:opacity-45";
 
 function toFriendCitiesText(value) {
     if (Array.isArray(value)) {
@@ -231,6 +233,10 @@ export default function InputForm({ initialValues, onSubmit }) {
         setValues((v) => ({ ...v, [key]: e.target.value.toUpperCase() }));
         setErrorText("");
     };
+    const clearTime = (key) => () => {
+        setValues((v) => ({ ...v, [key]: "" }));
+        setErrorText("");
+    };
 
     const handleSubmit = (e) => {
         e.preventDefault();
@@ -357,12 +363,23 @@ export default function InputForm({ initialValues, onSubmit }) {
                         <div className={FIELD_LABEL}>
                             Friday last class (local, optional)
                         </div>
-                        <input
-                            type="time"
-                            value={values.friday_last_class}
-                            onChange={update("friday_last_class")}
-                            className={FIELD_INPUT}
-                        />
+                        <div className="time-input-row">
+                            <input
+                                type="time"
+                                value={values.friday_last_class}
+                                onChange={update("friday_last_class")}
+                                className={`${FIELD_INPUT} time-input`}
+                            />
+                            <button
+                                type="button"
+                                onClick={clearTime("friday_last_class")}
+                                className={TIME_CLEAR_BUTTON}
+                                disabled={!values.friday_last_class}
+                                aria-label="Clear Friday last class time"
+                            >
+                                Clear
+                            </button>
+                        </div>
                         <div className="mt-2 text-xs text-[var(--muted)] font-['Space_Mono',monospace]">
                             Leave blank to skip Friday class constraints.
                         </div>
@@ -372,12 +389,23 @@ export default function InputForm({ initialValues, onSubmit }) {
                         <div className={FIELD_LABEL}>
                             Monday first class (local, optional)
                         </div>
-                        <input
-                            type="time"
-                            value={values.monday_first_class}
-                            onChange={update("monday_first_class")}
-                            className={FIELD_INPUT}
-                        />
+                        <div className="time-input-row">
+                            <input
+                                type="time"
+                                value={values.monday_first_class}
+                                onChange={update("monday_first_class")}
+                                className={`${FIELD_INPUT} time-input`}
+                            />
+                            <button
+                                type="button"
+                                onClick={clearTime("monday_first_class")}
+                                className={TIME_CLEAR_BUTTON}
+                                disabled={!values.monday_first_class}
+                                aria-label="Clear Monday first class time"
+                            >
+                                Clear
+                            </button>
+                        </div>
                         <div className="mt-2 text-xs text-[var(--muted)] font-['Space_Mono',monospace]">
                             Leave blank to skip Monday class constraints.
                         </div>
