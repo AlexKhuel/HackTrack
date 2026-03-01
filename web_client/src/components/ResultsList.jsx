@@ -239,8 +239,10 @@ export default function ResultsList({ formData }) {
             .map((h) => Number(h.travel_time_hours))
             .filter(Number.isFinite);
 
-        const prizeMin = prizes.length ? Math.min(...prizes) : 0;
-        const prizeMax = prizes.length ? Math.max(...prizes) : 0;
+        // Log-normalize prizes so wide ranges ($1K–$1M) don't distort scores
+        const logPrizes = prizes.map((p) => Math.log(Math.max(p, 1)));
+        const logPrizeMin = logPrizes.length ? Math.min(...logPrizes) : 0;
+        const logPrizeMax = logPrizes.length ? Math.max(...logPrizes) : 0;
         const travelPriceMin = travelPrices.length ? Math.min(...travelPrices) : 0;
         const travelPriceMax = travelPrices.length ? Math.max(...travelPrices) : 0;
         const travelMin = travels.length ? Math.min(...travels) : 0;
@@ -250,7 +252,6 @@ export default function ResultsList({ formData }) {
             .map((h) => {
                 const prizeValue = Number(h.prize_pool);
                 const hasPrizePool = Number.isFinite(prizeValue) && prizeValue > 0;
-                const normalizedPrize = hasPrizePool ? prizeValue : 0;
                 const totalCostValue = Number(h.estimated_cost);
                 const travelPriceValue =
                     Number.isFinite(totalCostValue) && totalCostValue >= 0
@@ -258,7 +259,7 @@ export default function ResultsList({ formData }) {
                         : null;
 
                 const prize_score = hasPrizePool
-                    ? norm(normalizedPrize, prizeMin, prizeMax)
+                    ? norm(Math.log(Math.max(prizeValue, 1)), logPrizeMin, logPrizeMax)
                     : 0;
                 const travel_price_score = inverseNorm(
                     travelPriceValue,

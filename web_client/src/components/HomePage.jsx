@@ -373,13 +373,13 @@ export default function HomePage({ onGetStarted }) {
                                         color: "var(--gold)",
                                     }}
                                 >
-                                    score = 0.35·prize
+                                    score = 0.30·prize
                                     <br />
-                                    &nbsp;&nbsp;&nbsp;&nbsp;+ 0.30·roi
+                                    &nbsp;&nbsp;&nbsp;&nbsp;+ 0.40·travel price
                                     <br />
-                                    &nbsp;&nbsp;&nbsp;&nbsp;+ 0.20·travel
+                                    &nbsp;&nbsp;&nbsp;&nbsp;+ 0.20·travel time
                                     <br />
-                                    &nbsp;&nbsp;&nbsp;&nbsp;+ 0.15·friends
+                                    &nbsp;&nbsp;&nbsp;&nbsp;+ 0.10·friends
                                 </code>
                                 <br />
                                 <br />
