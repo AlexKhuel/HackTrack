@@ -1,11 +1,11 @@
 {
-  "name": "irvine-hacks-backend",
+  "name": "irvine-hacks-http-api",
   "version": "1.0.0",
-  "description": "Hackathon optimizer backend",
-  "main": "src/index.js",
+  "description": "HTTP API service for hackathon feasibility and sync orchestration",
+  "main": "http_api/index.js",
   "scripts": {
-    "start": "node src/index.js",
-    "dev": "nodemon src/index.js",
+    "start": "node http_api/index.js",
+    "dev": "nodemon http_api/index.js",
     "test": "jest --runInBand",
     "test:watch": "jest --watch"
   },

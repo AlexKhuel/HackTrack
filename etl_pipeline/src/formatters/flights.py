@@ -427,7 +427,7 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
         help=(
             "Optional JSON mapping for origin_city/destination_city derivation. "
             "Accepts {\"LAX\":\"Los Angeles\"} or [{\"airport_code\":\"LAX\",\"city\":\"Los Angeles\"}]."
-            " Defaults to data_pipeline/data/airport_city_map.json when present."
+            " Defaults to etl_pipeline/data/airport_city_map.json when present."
         ),
     )
     return parser.parse_args(argv)

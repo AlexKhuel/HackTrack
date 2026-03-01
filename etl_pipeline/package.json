@@ -1,8 +1,8 @@
 {
-  "name": "irvine-hacks-supabase-pipeline",
+  "name": "irvine-hacks-etl-pipeline",
   "private": true,
   "version": "1.0.0",
-  "description": "JS DB loader for Irvine-Hacks data pipeline",
+  "description": "ETL pipeline for scraping, formatting, and loading hackathon data",
   "scripts": {
     "pipeline": "node run_pipeline.js",
     "pipeline:all": "node run_pipeline.js --include-all",

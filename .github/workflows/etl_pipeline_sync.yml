@@ -1,4 +1,4 @@
-name: Run Data Pipeline Sync
+name: Run ETL Pipeline Sync
 
 on:
   schedule:
@@ -10,7 +10,7 @@ jobs:
   trigger-sync:
     runs-on: ubuntu-latest
     steps:
-      - name: Trigger Backend Pipeline Sync
+      - name: Trigger API ETL Sync
         env:
           BACKEND_URL: ${{ secrets.BACKEND_API_URL }}
           ADMIN_KEY: ${{ secrets.ADMIN_API_KEY }}

@@ -1,7 +1,7 @@
 {
-  "name": "frontend",
+  "name": "irvine-hacks-web-client",
   "version": "1.0.0",
-  "description": "This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.",
+  "description": "Web client for hackathon feasibility discovery (React + Vite).",
   "main": "eslint.config.js",
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1",

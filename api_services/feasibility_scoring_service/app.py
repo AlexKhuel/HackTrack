@@ -1,9 +1,7 @@
 from fastapi import FastAPI
-from scorer import scored
-from db import update_user
+from .feasibility_scorer import scored
+from .database_client import update_user, load_events, load_routes, load_users, health_db_check
 import os
-from sqlalchemy import create_engine, text
-from db import load_events, load_routes, load_users, health_db_check
 
 app = FastAPI()
 

@@ -8,7 +8,7 @@ const dotenv = require('dotenv');
 
 const SCRIPT_DIR = __dirname;
 const REPO_ROOT = path.resolve(SCRIPT_DIR, '../../..');
-const AIRPORT_CITY_MAP_PATH = path.join(REPO_ROOT, 'data_pipeline', 'data', 'airport_city_map.json');
+const AIRPORT_CITY_MAP_PATH = path.join(REPO_ROOT, 'etl_pipeline', 'data', 'airport_city_map.json');
 
 const DEFAULT_AIRPORT_TO_CITY = Object.freeze({
   ATL: 'Atlanta',

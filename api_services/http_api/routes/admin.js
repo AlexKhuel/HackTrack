@@ -27,14 +27,14 @@ function checkAuth(req, res, next) {
 
 /**
  * POST /api/admin/sync-events
- * Triggers the data pipeline orchestrator asynchronously to re-scrape events.
+ * Triggers the ETL orchestrator asynchronously to re-scrape events.
  */
 router.post('/sync-events', checkAuth, (req, res) => {
     console.log('Admin triggered an asynchronous event data sync.');
 
-    // The actual pipeline orchestrator is in the data_pipeline/ folder at the root.
+    // The actual ETL orchestrator is in the etl_pipeline/ folder at the repo root.
     const repoRoot = path.resolve(__dirname, '../../../');
-    const pipelineScript = path.resolve(repoRoot, 'data_pipeline/run_pipeline.js');
+    const pipelineScript = path.resolve(repoRoot, 'etl_pipeline/run_pipeline.js');
 
     if (!fs.existsSync(pipelineScript)) {
         console.error(`Pipeline script not found at expected path: ${pipelineScript}`);
@@ -62,7 +62,7 @@ router.post('/sync-events', checkAuth, (req, res) => {
 
     return res.status(202).json({
         status: 'accepted',
-        message: 'Data pipeline synchronization started in the background.'
+        message: 'ETL pipeline synchronization started in the background.'
     });
 });
 

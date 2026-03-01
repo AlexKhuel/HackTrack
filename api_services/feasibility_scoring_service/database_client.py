@@ -19,7 +19,7 @@ def health_db_check():
     except Exception as e:
         return {"db": str(e)}
 
-def filter_feasible(df, max_cost, max_distance):#Pass max_cost and max_distance from frontend
+def filter_feasible(df, max_cost, max_distance):#Pass max_cost and max_distance from web client
     return df[
         (df["estimated_cost"] <= max_cost) &
         (df["travel_time"] <= max_distance)

@@ -18,8 +18,8 @@ Enter your home airport, Friday/Monday class times, and weekend budget. The app:
 
 | Layer | Technology |
 |---|---|
-| Frontend | React + Vite, Tailwind CSS |
-| Backend | Node.js + Express |
+| Web Client | React + Vite, Tailwind CSS |
+| API Services | Node.js + Express, Python + FastAPI (feasibility scoring) |
 | Database | Supabase (PostgreSQL) |
 | Scrapers | Python 3 (BeautifulSoup, requests) |
 | Scheduling | GitHub Actions (twice-weekly sync) |
@@ -29,15 +29,21 @@ Enter your home airport, Friday/Monday class times, and weekend budget. The app:
 ## Architecture
 
 ```
-├── backend/
-│   └── src/
-│       ├── routes/
-│       │   ├── hackathons.js     # GET /api/hackathons/feasible
-│       │   └── admin.js          # POST /api/admin/sync-events
-│       └── feasibility/
-│           ├── timeFeasibility.js
-│           └── budgetFeasibility.js
-└── data_pipeline/
+├── api_services/
+│   ├── http_api/
+│   │   ├── routes/
+│   │   │   ├── hackathons.js     # GET /api/hackathons/feasible
+│   │   │   └── admin.js          # POST /api/admin/sync-events
+│   │   └── feasibility/
+│   │       ├── timeFeasibility.js
+│   │       └── budgetFeasibility.js
+│   └── feasibility_scoring_service/  # FastAPI service for scoring/feasibility
+│       ├── app.py
+│       ├── feasibility_scorer.py
+│       └── database_client.py
+├── web_client/
+│   └── src/                      # React app (Vite)
+└── etl_pipeline/
     ├── scrapers/mlh/             # MLH 2026 season scraper
     ├── scrapers/devpost/         # Devpost API scraper
     ├── scrapers/devfolio/        # Devfolio scraper
@@ -106,7 +112,7 @@ Returns feasible hackathons for a given user context.
 
 ### `POST /api/admin/sync-events`
 
-Triggers the full background pipeline (events + routes + lodging) via `data_pipeline/run_pipeline.js --include-all`. Requires `Authorization` header. Returns `202 Accepted` immediately.
+Triggers the full background pipeline (events + routes + lodging) via `etl_pipeline/run_pipeline.js --include-all`. Requires `Authorization` header. Returns `202 Accepted` immediately.
 
 ### `GET /health`
 
@@ -126,12 +132,12 @@ Returns `{ "status": "ok" }`.
 
 MLH, Devpost, and Devfolio are scraped, merged, deduplicated, and loaded into Supabase on a schedule. GitHub Actions triggers a sync every Sunday and Wednesday at 00:00 UTC, or on demand via the admin endpoint.
 
-Flight route and lodging datasets are committed in-repo (`data_pipeline/data/`) so new contributors do not need to download CSVs first.
+Flight route and lodging datasets are committed in-repo (`etl_pipeline/data/`) so new contributors do not need to download CSVs first.
 
 Master pipeline command:
 
 ```bash
-npm --prefix data_pipeline run pipeline:all
+npm --prefix etl_pipeline run pipeline:all
 ```
 
-Detailed implementation and CLI docs live in [`data_pipeline/README.md`](data_pipeline/README.md).
+Detailed implementation and CLI docs live in [`etl_pipeline/README.md`](etl_pipeline/README.md).
