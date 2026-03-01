@@ -428,13 +428,13 @@ nav ul a:hover { color: var(--teal); }
   background: linear-gradient(
     105deg,
     var(--ember) 0%,
-    #e85d2f 40%,
-    rgba(255,255,255,0.28) 50%,
-    #e85d2f 60%,
+    #e85d2f 35%,
+    var(--gold) 50%,
+    #e85d2f 65%,
     var(--ember) 100%
   );
   background-size: 200% auto;
-  animation: btnShimmer 2.8s linear infinite;
+  animation: btnShimmer 2.4s linear infinite;
   color: #fff;
   padding: 0.9rem 2.2rem;
   border: none;
@@ -707,6 +707,7 @@ section {
 .score-demo-wrap {
   max-width: 900px;
   margin: 0 auto;
+  padding-top: 2rem;
   display: grid;
   grid-template-columns: 1fr 1fr;
   gap: 2rem;
@@ -807,6 +808,64 @@ section {
   font-size: 0.7rem;
   line-height: 1.35;
   font-family: 'Space Mono', monospace;
+}
+
+/* FRIEND CITY TAG INPUT */
+.friend-tag-input {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.4rem;
+  min-height: 3rem;
+  background: rgba(245,237,214,0.07);
+  border: 1px solid rgba(0,200,180,0.18);
+  border-radius: 6px;
+  padding: 0.5rem 0.75rem;
+  cursor: text;
+  transition: border-color 0.15s;
+}
+.friend-tag-input:focus-within {
+  border-color: var(--teal);
+}
+.friend-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  background: rgba(0,229,204,0.12);
+  border: 1px solid rgba(0,229,204,0.35);
+  color: var(--teal);
+  font-family: 'Space Mono', monospace;
+  font-size: 0.72rem;
+  font-weight: 600;
+  padding: 0.2rem 0.55rem;
+  border-radius: 99px;
+  white-space: nowrap;
+}
+.friend-chip-remove {
+  background: none;
+  border: none;
+  color: var(--teal);
+  cursor: pointer;
+  font-size: 0.65rem;
+  line-height: 1;
+  padding: 0;
+  opacity: 0.6;
+  transition: opacity 0.15s;
+}
+.friend-chip-remove:hover { opacity: 1; }
+.friend-tag-text-input {
+  flex: 1;
+  min-width: 8rem;
+  background: none;
+  border: none;
+  outline: none;
+  color: var(--cream);
+  font-family: 'Syne', sans-serif;
+  font-size: 1rem;
+  padding: 0;
+}
+.friend-tag-text-input::placeholder {
+  color: rgba(245,237,214,0.3);
 }
 
 /* RESULT CARD ENTRANCE */

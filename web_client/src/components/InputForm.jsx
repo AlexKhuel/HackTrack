@@ -122,7 +122,7 @@ function formStateFromInitial(initialValues) {
         max_time: "",
         friday_last_class: "",
         monday_first_class: "",
-        friend_cities: "",
+        friend_cities: [],
     };
 
     if (initialValues && typeof initialValues === "object") {
@@ -146,7 +146,7 @@ function formStateFromInitial(initialValues) {
         initialValues?.monday_first_class,
         timezone,
     );
-    next.friend_cities = toFriendCitiesText(initialValues?.friend_cities);
+    next.friend_cities = parseFriendCities(toFriendCitiesText(initialValues?.friend_cities));
 
     return next;
 }
@@ -156,6 +156,44 @@ export default function InputForm({ initialValues, onSubmit }) {
         formStateFromInitial(initialValues),
     );
     const [errorText, setErrorText] = useState("");
+    const [friendInput, setFriendInput] = useState("");
+
+    const addFriendCity = (raw) => {
+        const city = raw.trim();
+        if (!city) return;
+        const key = city.toLowerCase();
+        setValues((v) => {
+            if (v.friend_cities.some((c) => c.toLowerCase() === key)) return v;
+            return { ...v, friend_cities: [...v.friend_cities, city] };
+        });
+    };
+
+    const removeFriendCity = (index) => {
+        setValues((v) => ({
+            ...v,
+            friend_cities: v.friend_cities.filter((_, i) => i !== index),
+        }));
+    };
+
+    const handleFriendKeyDown = (e) => {
+        if (e.key === "Enter" || e.key === ",") {
+            e.preventDefault();
+            addFriendCity(friendInput);
+            setFriendInput("");
+        } else if (e.key === "Backspace" && !friendInput && values.friend_cities.length > 0) {
+            removeFriendCity(values.friend_cities.length - 1);
+        }
+    };
+
+    const handleFriendChange = (e) => {
+        const val = e.target.value;
+        if (val.endsWith(",")) {
+            addFriendCity(val.slice(0, -1));
+            setFriendInput("");
+        } else {
+            setFriendInput(val);
+        }
+    };
 
     useEffect(() => {
         if (!initialValues) return;
@@ -221,7 +259,7 @@ export default function InputForm({ initialValues, onSubmit }) {
                 values.monday_first_class,
                 inferred.timezone,
             ),
-            friend_cities: parseFriendCities(values.friend_cities),
+            friend_cities: values.friend_cities,
         };
     }, [values, inferred]);
 
@@ -450,17 +488,31 @@ export default function InputForm({ initialValues, onSubmit }) {
                     </label>
                 </div>
 
-                <label className="block">
-                    <div className={FIELD_LABEL}>
-                        Friend cities (comma separated)
+                <div>
+                    <div className={FIELD_LABEL}>Friend cities</div>
+                    <div className="friend-tag-input">
+                        {values.friend_cities.map((city, i) => (
+                            <span key={city} className="friend-chip">
+                                {city}
+                                <button
+                                    type="button"
+                                    className="friend-chip-remove"
+                                    onClick={() => removeFriendCity(i)}
+                                    aria-label={`Remove ${city}`}
+                                >
+                                    ✕
+                                </button>
+                            </span>
+                        ))}
+                        <input
+                            value={friendInput}
+                            onChange={handleFriendChange}
+                            onKeyDown={handleFriendKeyDown}
+                            placeholder={values.friend_cities.length === 0 ? "Type a city, press Enter or ," : "Add another…"}
+                            className="friend-tag-text-input"
+                        />
                     </div>
-                    <input
-                        value={values.friend_cities}
-                        onChange={update("friend_cities")}
-                        placeholder="Stanford, Berkeley, Philadelphia"
-                        className={FIELD_INPUT}
-                    />
-                </label>
+                </div>
 
                 <div className="flex items-center justify-between gap-6">
                     <div className="text-xs font-semibold uppercase tracking-[0.25em] text-[var(--cream)] font-['Space_Mono',monospace]">

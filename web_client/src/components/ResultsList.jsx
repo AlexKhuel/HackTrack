@@ -532,6 +532,10 @@ export default function ResultsList({
         }
     };
 
+    useEffect(() => {
+        if (!isLoading) window.scrollTo({ top: 0, behavior: "instant" });
+    }, [isLoading]);
+
     const status = isLoading
         ? "loading"
         : errorText
