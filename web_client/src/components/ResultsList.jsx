@@ -448,10 +448,22 @@ export default function ResultsList({ formData }) {
                         const isFriendNearby = friendScore > 0;
                         const totalCostLabel = formatUSD(h.estimated_cost);
                         const flightCostLabel = formatUSD(h.estimated_flight_cost);
-                        const lodgingCostLabel = formatUSD(h.estimated_lodging_cost);
+                        const hotelCostLabel = formatUSD(h.estimated_lodging_cost);
+                        const hasFlightCost = Number.isFinite(
+                            h.estimated_flight_cost,
+                        );
+                        const hasHotelCost = Number.isFinite(
+                            h.estimated_lodging_cost,
+                        );
                         const hasCostBreakdown =
-                            Number.isFinite(h.estimated_flight_cost) ||
-                            Number.isFinite(h.estimated_lodging_cost);
+                            hasFlightCost || hasHotelCost;
+                        const hotelShareSavings =
+                            hasHotelCost && h.estimated_lodging_cost > 0
+                                ? h.estimated_lodging_cost / 2
+                                : null;
+                        const hotelShareSavingsLabel = formatUSD(
+                            hotelShareSavings,
+                        );
                         return (
                             <article key={h.id} className="demo-card">
                                 <div className="demo-card-header">
@@ -536,10 +548,15 @@ export default function ResultsList({ formData }) {
                                         <div className="meta-label">
                                             Est Cost
                                         </div>
-                                        <div className="meta-value gold">{`${totalCostLabel} total`}</div>
+                                        <div className="meta-value gold">{`${totalCostLabel} round trip`}</div>
                                         {hasCostBreakdown ? (
                                             <div className="meta-subvalue">
-                                                {`Flight ${flightCostLabel} + Lodging ${lodgingCostLabel}`}
+                                                {`Flight ${flightCostLabel} · Hotel ${hotelCostLabel}`}
+                                            </div>
+                                        ) : null}
+                                        {Number.isFinite(hotelShareSavings) ? (
+                                            <div className="meta-subvalue">
+                                                {`Hotel share: save ${hotelShareSavingsLabel}`}
                                             </div>
                                         ) : null}
                                     </div>

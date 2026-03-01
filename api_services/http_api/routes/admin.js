@@ -44,7 +44,6 @@ router.post('/sync-events', checkAuth, (req, res) => {
     const args = [
         pipelineScript,
         '--include-all',
-        '--skip-devpost',
         '--skip-devfolio',
         // Keep events/routes/lodging refreshed together to avoid cross-table drift.
     ];

@@ -670,7 +670,7 @@ router.get('/feasible', async (req, res) => {
   try {
     // 1. Fetch in-person events
     const eventParams = [];
-    const eventWhere = ['in_person = TRUE', "LOWER(source) = 'mlh'"];
+    const eventWhere = ['in_person = TRUE', "(LOWER(source) LIKE '%mlh%' OR LOWER(source) LIKE '%devpost%')"];
 
     if (normalizedDateRangeStart) {
       eventParams.push(normalizedDateRangeStart);

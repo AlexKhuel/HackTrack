@@ -243,6 +243,13 @@ node etl_pipeline/src/loaders/events.js \
   --table events
 ```
 
+The events loader validates each non-empty event URL over HTTP before insert.
+Optional tuning flags:
+
+- `--skip-url-validation`
+- `--url-validation-timeout-ms <ms>` (default `4500`)
+- `--url-validation-concurrency <n>` (default `12`)
+
 Routes:
 
 ```bash

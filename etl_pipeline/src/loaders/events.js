@@ -10,6 +10,9 @@ const REPO_ROOT = path.resolve(SCRIPT_DIR, '../../..');
 
 const SPACE_RE = /\s+/g;
 const NON_ALNUM_RE = /[^a-z0-9]+/g;
+const URL_COLUMN_INDEX = 8;
+const DEFAULT_URL_VALIDATION_TIMEOUT_MS = 4500;
+const DEFAULT_URL_VALIDATION_CONCURRENCY = 12;
 
 function timestamp() {
   return new Date().toISOString();
@@ -31,6 +34,9 @@ function parseArgs(argv) {
     batchSize: 500,
     replaceExisting: false,
     dryRun: false,
+    skipUrlValidation: false,
+    urlValidationTimeoutMs: DEFAULT_URL_VALIDATION_TIMEOUT_MS,
+    urlValidationConcurrency: DEFAULT_URL_VALIDATION_CONCURRENCY,
   };
 
   for (let i = 0; i < argv.length; i += 1) {
@@ -66,6 +72,26 @@ function parseArgs(argv) {
       args.dryRun = true;
       continue;
     }
+    if (token === '--skip-url-validation') {
+      args.skipUrlValidation = true;
+      continue;
+    }
+    if (token === '--url-validation-timeout-ms') {
+      const raw = argv[i + 1];
+      i += 1;
+      if (raw && Number.isFinite(Number(raw)) && Number(raw) > 0) {
+        args.urlValidationTimeoutMs = Number(raw);
+      }
+      continue;
+    }
+    if (token === '--url-validation-concurrency') {
+      const raw = argv[i + 1];
+      i += 1;
+      if (raw && Number.isFinite(Number(raw)) && Number(raw) > 0) {
+        args.urlValidationConcurrency = Number(raw);
+      }
+      continue;
+    }
 
     throw new Error(`Unknown argument: ${token}`);
   }
@@ -75,6 +101,71 @@ function parseArgs(argv) {
   }
 
   return args;
+}
+
+function isReachableHttpStatus(statusCode) {
+  return (statusCode >= 200 && statusCode < 400)
+    || statusCode === 401
+    || statusCode === 403
+    || statusCode === 405
+    || statusCode === 429;
+}
+
+async function fetchWithTimeout(url, options, timeoutMs) {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    return await fetch(url, { ...options, signal: controller.signal, redirect: 'follow' });
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+async function validateUrlReachability(url, timeoutMs) {
+  const requestHeaders = { 'User-Agent': 'irvine-hacks-etl-url-validator/1.0' };
+  try {
+    const headResponse = await fetchWithTimeout(
+      url,
+      {
+        method: 'HEAD',
+        headers: requestHeaders,
+      },
+      timeoutMs,
+    );
+
+    if (isReachableHttpStatus(headResponse.status)) {
+      return { valid: true, statusCode: headResponse.status };
+    }
+    if (headResponse.status !== 405 && headResponse.status !== 501) {
+      return { valid: false, statusCode: headResponse.status };
+    }
+  } catch {
+    // Fall through to GET if HEAD is blocked or unsupported.
+  }
+
+  try {
+    const getResponse = await fetchWithTimeout(
+      url,
+      {
+        method: 'GET',
+        headers: {
+          ...requestHeaders,
+          Range: 'bytes=0-0',
+        },
+      },
+      timeoutMs,
+    );
+    if (getResponse.body && typeof getResponse.body.cancel === 'function') {
+      getResponse.body.cancel().catch(() => {});
+    }
+    return { valid: isReachableHttpStatus(getResponse.status), statusCode: getResponse.status };
+  } catch (error) {
+    return {
+      valid: false,
+      statusCode: null,
+      error: error instanceof Error ? error.message : String(error),
+    };
+  }
 }
 
 function validateTableName(table) {
@@ -270,6 +361,77 @@ async function insertRows(client, table, rows, batchSize) {
   return inserted;
 }
 
+async function filterRowsWithValidatedUrls(rows, timeoutMs, concurrency) {
+  if (!rows.length) {
+    return {
+      rowsToInsert: rows,
+      checkedUrlCount: 0,
+      uniqueUrlCount: 0,
+      skippedMalformedUrl: 0,
+      skippedUnreachableUrl: 0,
+    };
+  }
+
+  const filteredRows = new Array(rows.length);
+  const reachabilityByUrl = new Map();
+  let nextIndex = 0;
+  let checkedUrlCount = 0;
+  let skippedMalformedUrl = 0;
+  let skippedUnreachableUrl = 0;
+
+  async function getReachability(url) {
+    const existing = reachabilityByUrl.get(url);
+    if (existing) return existing;
+    const pending = validateUrlReachability(url, timeoutMs);
+    reachabilityByUrl.set(url, pending);
+    return pending;
+  }
+
+  async function worker() {
+    while (true) {
+      const currentIndex = nextIndex;
+      nextIndex += 1;
+      if (currentIndex >= rows.length) return;
+
+      const row = rows[currentIndex];
+      const rawUrl = row[URL_COLUMN_INDEX];
+
+      if (rawUrl == null || String(rawUrl).trim() === '') {
+        filteredRows[currentIndex] = row;
+        continue;
+      }
+
+      const normalizedUrl = normalizeUrlKey(rawUrl);
+      if (!normalizedUrl) {
+        skippedMalformedUrl += 1;
+        continue;
+      }
+
+      checkedUrlCount += 1;
+      const reachability = await getReachability(normalizedUrl);
+      if (!reachability.valid) {
+        skippedUnreachableUrl += 1;
+        continue;
+      }
+
+      const normalizedRow = [...row];
+      normalizedRow[URL_COLUMN_INDEX] = normalizedUrl;
+      filteredRows[currentIndex] = normalizedRow;
+    }
+  }
+
+  const workerCount = Math.max(1, Math.min(Number(concurrency) || 1, rows.length));
+  await Promise.all(Array.from({ length: workerCount }, () => worker()));
+
+  return {
+    rowsToInsert: filteredRows.filter(Boolean),
+    checkedUrlCount,
+    uniqueUrlCount: reachabilityByUrl.size,
+    skippedMalformedUrl,
+    skippedUnreachableUrl,
+  };
+}
+
 async function main() {
   loadEnvFiles();
   const args = parseArgs(process.argv.slice(2));
@@ -300,6 +462,8 @@ async function main() {
   let inserted = 0;
   let skippedExisting = 0;
   let skippedInternalDuplicate = 0;
+  let skippedMalformedUrl = 0;
+  let skippedUnreachableUrl = 0;
 
   try {
     await client.query('BEGIN');
@@ -323,9 +487,37 @@ async function main() {
     const prepared = prepareInsertRows(cleanedRows, existingUrlKeys, existingNameStartKeys);
     skippedExisting = prepared.skippedExisting;
     skippedInternalDuplicate = prepared.skippedInternalDuplicate;
-    log(`Rows prepared for insert: ${prepared.rowsToInsert.length}`);
+    let rowsToInsert = prepared.rowsToInsert;
+    log(`Rows prepared for insert: ${rowsToInsert.length}`);
 
-    inserted = await insertRows(client, table, prepared.rowsToInsert, args.batchSize);
+    if (args.skipUrlValidation) {
+      log('Skipping URL validation (--skip-url-validation).');
+    } else {
+      if (typeof fetch !== 'function') {
+        throw new Error(
+          'URL validation requires a Node.js runtime with global fetch support. Use --skip-url-validation to bypass.',
+        );
+      }
+      log(
+        `Validating event URLs before insert (timeout_ms=${args.urlValidationTimeoutMs}, ` +
+        `concurrency=${args.urlValidationConcurrency})...`,
+      );
+      const validation = await filterRowsWithValidatedUrls(
+        rowsToInsert,
+        args.urlValidationTimeoutMs,
+        args.urlValidationConcurrency,
+      );
+      rowsToInsert = validation.rowsToInsert;
+      skippedMalformedUrl = validation.skippedMalformedUrl;
+      skippedUnreachableUrl = validation.skippedUnreachableUrl;
+      log(
+        `URL validation complete: kept=${rowsToInsert.length}, checked=${validation.checkedUrlCount}, ` +
+        `unique_urls=${validation.uniqueUrlCount}, skipped_malformed_url=${skippedMalformedUrl}, ` +
+        `skipped_unreachable_url=${skippedUnreachableUrl}`,
+      );
+    }
+
+    inserted = await insertRows(client, table, rowsToInsert, args.batchSize);
 
     await client.query('COMMIT');
   } catch (error) {
@@ -337,7 +529,8 @@ async function main() {
 
   log(
     `Load complete: inserted=${inserted}, skipped_existing=${skippedExisting}, ` +
-    `skipped_internal_duplicate=${skippedInternalDuplicate}, total_cleaned=${cleanedRows.length}`,
+    `skipped_internal_duplicate=${skippedInternalDuplicate}, skipped_malformed_url=${skippedMalformedUrl}, ` +
+    `skipped_unreachable_url=${skippedUnreachableUrl}, total_cleaned=${cleanedRows.length}`,
   );
 }
 
