@@ -285,6 +285,8 @@ function hasFriendInDestinationCity(eventCity, routeDestinationCity, destAirport
  *   friend_cities              - optional city list for free lodging if friend lives there
  *   date_range_start           - ISO 8601 datetime with explicit timezone
  *   date_range_end             - ISO 8601 datetime with explicit timezone
+ *   max_flight_duration        - max combined outbound+return flight time in minutes
+ *   min_prize_pool             - minimum event prize pool in USD
  */
 router.get('/feasible', async (req, res) => {
   const {
@@ -296,6 +298,8 @@ router.get('/feasible', async (req, res) => {
     friend_cities,
     date_range_start,
     date_range_end,
+    max_flight_duration,
+    min_prize_pool,
   } = req.query;
 
   if (!friday_last_class_end || !monday_first_class_start || !user_timezone || !budget) {
@@ -324,6 +328,22 @@ router.get('/feasible', async (req, res) => {
 
   if (isNaN(budgetNum) || budgetNum <= 0) {
     return res.status(400).json({ error: 'budget must be a positive number' });
+  }
+
+  let maxFlightDurationNum = null;
+  if (max_flight_duration != null && max_flight_duration !== '') {
+    maxFlightDurationNum = parseFloat(max_flight_duration);
+    if (!Number.isFinite(maxFlightDurationNum) || maxFlightDurationNum < 0) {
+      return res.status(400).json({ error: 'max_flight_duration must be a non-negative number (total minutes)' });
+    }
+  }
+
+  let minPrizePoolNum = null;
+  if (min_prize_pool != null && min_prize_pool !== '') {
+    minPrizePoolNum = parseFloat(min_prize_pool);
+    if (!Number.isFinite(minPrizePoolNum) || minPrizePoolNum < 0) {
+      return res.status(400).json({ error: 'min_prize_pool must be a non-negative number (USD)' });
+    }
   }
 
   let fridayLastClassEndHHMM;
@@ -414,6 +434,12 @@ router.get('/feasible', async (req, res) => {
         end_datetime_utc: normalizedEventEnd,
       };
 
+      // Apply min_prize_pool filter before running feasibility checks.
+      if (minPrizePoolNum != null) {
+        const prizePool = Number(event.prize_pool);
+        if (!Number.isFinite(prizePool) || prizePool < minPrizePoolNum) continue;
+      }
+
       // Resolve city → airport and evaluate drive/flight travel options.
       const destAirport = resolveAirport(event.city);
       const isLocalDriveTrip = Boolean(destAirport && originAirportSet.has(destAirport));
@@ -462,6 +488,10 @@ router.get('/feasible', async (req, res) => {
           const outboundDuration = travelMode === 'drive' ? 0 : Number(route?.avg_outbound_duration_minutes);
           const returnDuration = travelMode === 'drive' ? 0 : Number(route?.avg_return_duration_minutes);
           if (!Number.isFinite(outboundDuration) || !Number.isFinite(returnDuration)) continue;
+
+          if (maxFlightDurationNum != null && travelMode === 'flight') {
+            if (outboundDuration + returnDuration > maxFlightDurationNum) continue;
+          }
 
           const eventTimezone = resolveAirportTimezone(destAirport) || event.event_timezone || 'UTC';
           timeResult = checkTimeFeasibility(
