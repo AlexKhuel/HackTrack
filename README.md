@@ -42,6 +42,7 @@ There is also a separate Python service:
   - iOS: Capacitor social login plugin.
 - Guest mode (no auth required to search).
 - Optional persistence of user input when signed in (`/api/user-inputs`).
+- After sign-in, restores latest saved input when URL query params are not explicitly set.
 - URL-backed form state (`?view=...&...`) for shareable/reloadable sessions.
 - Airport-based timezone/country inference with browser fallback.
 - Local class time input converted into API-compatible timezone-aware boundaries.
@@ -50,6 +51,10 @@ There is also a separate Python service:
   - client-side filters (max one-way travel hours, min prize pool)
   - client-side composite ranking visualization
   - external event links
+  - "Copy Journal" action that builds a Markdown travel brief and copies it to clipboard
+  - Google Flights / Hotels / Uber deep links in the copied journal
+  - optional browser geolocation for better Uber pickup context
+- On-demand event-page metadata scrape integration via `GET /api/hackathons/scrape-event`.
 - Animated map background and responsive iOS-safe layout behavior.
 
 ### API (`api_services/http_api`)
@@ -57,6 +62,9 @@ There is also a separate Python service:
 - Feasibility endpoint at:
   - `GET /api/hackathons/feasible`
   - alias: `GET /api/events/feasible`
+- Event metadata scrape endpoint at:
+  - `GET /api/hackathons/scrape-event`
+  - alias: `GET /api/events/scrape-event`
 - Supports 1 to 3 origin airports and prioritizes route choices by airport order.
 - Budget feasibility:
   - route price + lodging model
@@ -65,6 +73,7 @@ There is also a separate Python service:
 - Time feasibility:
   - Friday departure and Monday return constraints
   - timezone-aware UTC boundary checks
+- Optional `include_unmapped=true` mode to return feasible event rows with unknown route/cost metadata when strict feasibility cannot be resolved.
 - Destination resolution fallbacks:
   - static city-to-airport mapping
   - route-city inference fallback
@@ -75,6 +84,7 @@ There is also a separate Python service:
   - `app_users` + linked `public."user"` input records
 - Admin orchestration endpoint:
   - `POST /api/admin/sync-events` triggers ETL in a detached background process.
+  - protected by `Authorization: <ADMIN_API_KEY>`.
 
 ### ETL (`etl_pipeline`)
 
@@ -126,12 +136,39 @@ Response shape:
   - `cost_estimate`
   - `time_feasibility`
 
+### `GET /api/hackathons/scrape-event`
+
+Required query params:
+- `url`: absolute `http` or `https` URL
+
+Behavior:
+- fetches page HTML and extracts event metadata using JSON-LD plus common `<meta>` tags
+- blocks localhost/private-network targets for safety
+
+Response shape:
+- `fetched_url`
+- `event` with:
+  - `name`
+  - `school`
+  - `city`
+  - `state`
+  - `country`
+  - `venue_name`
+  - `start_datetime_utc`
+  - `end_datetime_utc`
+  - `url`
+  - `source`
+
 ### Auth/User Endpoints
 
 - `POST /api/auth/google`
 - `GET /api/auth/me`
 - `POST /api/user-inputs`
 - `GET /api/user-inputs/latest`
+
+### Admin Endpoint
+
+- `POST /api/admin/sync-events` (requires `Authorization: <ADMIN_API_KEY>`)
 
 ### Health
 
@@ -145,6 +182,7 @@ Response shape:
   - `--skip-devfolio`
   This keeps routes/lodging updated and refreshes MLH + Devpost events in that path.
 - Frontend ranking display is computed client-side in `ResultsList.jsx` and is separate from backend feasibility pass/fail decisions.
+- Frontend sets `include_unmapped=true` only for unconstrained searches (no explicit budget, travel-time, or class-time constraints) so users can still see upcoming events when route/cost coverage is incomplete.
 
 ## Local Setup
 
@@ -220,7 +258,11 @@ Default: `http://127.0.0.1:3000`
 npm --prefix web_client run dev
 ```
 
-If API is not on `3000`, set `VITE_API_PROXY_TARGET` for that shell session.
+If API is not on `3000`, set `VITE_API_BASE_URL` in `web_client/.env` to the API origin.
+
+`VITE_API_PROXY_TARGET` is only needed when using Vite's dev proxy for relative `/api` requests.
+
+For iOS (Capacitor), set `VITE_API_BASE_URL_IOS` to a host reachable from your phone/simulator (not `localhost` on-device).
 
 ### ETL (full pipeline)
 
@@ -252,6 +294,12 @@ Frontend production build:
 
 ```bash
 npm --prefix web_client run build
+```
+
+ETL dry run (no DB writes):
+
+```bash
+npm --prefix etl_pipeline run pipeline:all:dry
 ```
 
 ## Deployment and Operations
