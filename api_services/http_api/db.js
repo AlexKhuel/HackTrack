@@ -33,10 +33,16 @@ async function ensureAppSchema() {
         email TEXT,
         name TEXT,
         picture_url TEXT,
+        profile_row_id BIGINT NULL,
         last_login_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
         created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
         updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
       );
+    `);
+
+    await pool.query(`
+      ALTER TABLE app_users
+      ADD COLUMN IF NOT EXISTS profile_row_id BIGINT NULL;
     `);
 
     await pool.query(`

@@ -86,75 +86,150 @@ router.post('/', async (req, res) => {
     return res.status(400).json({ error: 'Invalid input payload.' });
   }
 
+  const client = await db.pool.connect();
   try {
-    const result = await db.query(
+    await client.query('BEGIN');
+
+    const appUserResult = await client.query(
       `
-        INSERT INTO public."user" (
-          id,
-          name,
-          country,
-          primary_airport_code,
-          secondary_airport_code,
-          tertiary_airport_code,
-          friend_cities,
-          timezone,
-          max_cost,
-          max_time,
-          friday_last_class,
-          monday_first_class
-        )
-        VALUES (
-          $1, $2, $3, $4, $5, $6,
-          $7::text[],
-          $8, $9, $10, $11, $12
-        )
-        ON CONFLICT (id)
-        DO UPDATE SET
-          name = EXCLUDED.name,
-          country = EXCLUDED.country,
-          primary_airport_code = EXCLUDED.primary_airport_code,
-          secondary_airport_code = EXCLUDED.secondary_airport_code,
-          tertiary_airport_code = EXCLUDED.tertiary_airport_code,
-          friend_cities = EXCLUDED.friend_cities,
-          timezone = EXCLUDED.timezone,
-          max_cost = EXCLUDED.max_cost,
-          max_time = EXCLUDED.max_time,
-          friday_last_class = EXCLUDED.friday_last_class,
-          monday_first_class = EXCLUDED.monday_first_class
-        RETURNING
-          id,
-          name,
-          country,
-          primary_airport_code,
-          secondary_airport_code,
-          tertiary_airport_code,
-          friend_cities,
-          timezone,
-          max_cost,
-          max_time,
-          friday_last_class,
-          monday_first_class;
+        SELECT profile_row_id
+        FROM app_users
+        WHERE id = $1
+        LIMIT 1
+        FOR UPDATE;
       `,
-      [
-        req.auth.user_id,
-        input.name,
-        input.country,
-        input.primary_airport_code,
-        input.secondary_airport_code,
-        input.tertiary_airport_code,
-        input.friend_cities,
-        input.timezone,
-        input.max_cost,
-        input.max_time,
-        input.friday_last_class,
-        input.monday_first_class,
-      ]
+      [req.auth.user_id]
     );
 
-    return res.status(201).json({ input: result.rows[0] });
+    if (appUserResult.rowCount === 0) {
+      await client.query('ROLLBACK');
+      return res.status(401).json({ error: 'Authenticated user was not found.' });
+    }
+
+    const profileRowId = Number(appUserResult.rows[0].profile_row_id);
+    const hasLinkedProfileRow = Number.isFinite(profileRowId) && profileRowId > 0;
+    let savedInputResult;
+
+    if (hasLinkedProfileRow) {
+      savedInputResult = await client.query(
+        `
+          UPDATE public."user"
+          SET
+            name = $2,
+            country = $3,
+            primary_airport_code = $4,
+            secondary_airport_code = $5,
+            tertiary_airport_code = $6,
+            friend_cities = $7::text[],
+            timezone = $8,
+            max_cost = $9,
+            max_time = $10,
+            friday_last_class = $11,
+            monday_first_class = $12
+          WHERE id = $1
+          RETURNING
+            id,
+            name,
+            country,
+            primary_airport_code,
+            secondary_airport_code,
+            tertiary_airport_code,
+            friend_cities,
+            timezone,
+            max_cost,
+            max_time,
+            friday_last_class,
+            monday_first_class;
+        `,
+        [
+          profileRowId,
+          input.name,
+          input.country,
+          input.primary_airport_code,
+          input.secondary_airport_code,
+          input.tertiary_airport_code,
+          input.friend_cities,
+          input.timezone,
+          input.max_cost,
+          input.max_time,
+          input.friday_last_class,
+          input.monday_first_class,
+        ]
+      );
+    }
+
+    if (!savedInputResult || savedInputResult.rowCount === 0) {
+      savedInputResult = await client.query(
+        `
+          INSERT INTO public."user" (
+            name,
+            country,
+            primary_airport_code,
+            secondary_airport_code,
+            tertiary_airport_code,
+            friend_cities,
+            timezone,
+            max_cost,
+            max_time,
+            friday_last_class,
+            monday_first_class
+          )
+          VALUES (
+            $1, $2, $3, $4, $5,
+            $6::text[],
+            $7, $8, $9, $10, $11
+          )
+          RETURNING
+            id,
+            name,
+            country,
+            primary_airport_code,
+            secondary_airport_code,
+            tertiary_airport_code,
+            friend_cities,
+            timezone,
+            max_cost,
+            max_time,
+            friday_last_class,
+            monday_first_class;
+        `,
+        [
+          input.name,
+          input.country,
+          input.primary_airport_code,
+          input.secondary_airport_code,
+          input.tertiary_airport_code,
+          input.friend_cities,
+          input.timezone,
+          input.max_cost,
+          input.max_time,
+          input.friday_last_class,
+          input.monday_first_class,
+        ]
+      );
+
+      await client.query(
+        `
+          UPDATE app_users
+          SET profile_row_id = $1, updated_at = NOW()
+          WHERE id = $2;
+        `,
+        [savedInputResult.rows[0].id, req.auth.user_id]
+      );
+    }
+
+    await client.query('COMMIT');
+    return res.status(201).json({ input: savedInputResult.rows[0] });
   } catch (err) {
+    try {
+      await client.query('ROLLBACK');
+    } catch {
+      // Ignore rollback failures; original error is more useful.
+    }
     console.error('[user-inputs] Failed to save user input:', err);
     return res.status(500).json({ error: 'Failed to save user input.' });
+  } finally {
+    client.release();
   }
 });
 
@@ -163,26 +238,32 @@ router.get('/latest', async (req, res) => {
     const result = await db.query(
       `
         SELECT
-          id,
-          name,
-          country,
-          primary_airport_code,
-          secondary_airport_code,
-          tertiary_airport_code,
-          friend_cities,
-          timezone,
-          max_cost,
-          max_time,
-          friday_last_class,
-          monday_first_class
-        FROM public."user"
-        WHERE id = $1
+          input.id,
+          input.name,
+          input.country,
+          input.primary_airport_code,
+          input.secondary_airport_code,
+          input.tertiary_airport_code,
+          input.friend_cities,
+          input.timezone,
+          input.max_cost,
+          input.max_time,
+          input.friday_last_class,
+          input.monday_first_class
+        FROM app_users au
+        LEFT JOIN public."user" input
+          ON input.id = au.profile_row_id
+        WHERE au.id = $1
         LIMIT 1;
       `,
       [req.auth.user_id]
     );
 
     if (result.rowCount === 0) {
+      return res.status(401).json({ error: 'Authenticated user was not found.' });
+    }
+
+    if (!result.rows[0].id) {
       return res.json({ input: null });
     }
 

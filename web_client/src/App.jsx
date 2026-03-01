@@ -336,7 +336,7 @@ export default function App() {
     <div className="min-h-screen bg-transparent text-white">
       <BackgroundScene />
       <div className="relative z-10">
-        <div className="fixed right-4 top-[calc(var(--safe-top)+0.8rem)] z-[120] flex items-center gap-3 rounded-full border border-[var(--border)] bg-[rgba(0,20,35,0.8)] px-3 py-2 backdrop-blur-sm">
+        <div className="fixed right-4 top-[calc(var(--safe-top)+4.75rem)] z-[120] flex items-center gap-3 rounded-full border border-[var(--border)] bg-[rgba(0,20,35,0.8)] px-3 py-2 backdrop-blur-sm">
           <span className="max-w-[180px] truncate text-xs text-[var(--muted)] font-['Space_Mono',monospace]">
             {sessionUser?.name || sessionUser?.email || "Signed in"}
           </span>
