@@ -23,6 +23,9 @@ const GEO_RESULT_COUNT = 10;
 const DRIVE_AIRPORT_CLUSTERS = [
   new Set(['LAX', 'SNA', 'LGB', 'ONT', 'BUR']),
 ];
+const AMBIGUOUS_US_CITY_TOKENS = new Set([
+  'ontario',
+]);
 const US_COUNTRY_TOKENS = new Set([
   'united states',
   'united states of america',
@@ -352,6 +355,11 @@ function buildCityCandidateTokens(rawCity) {
   }
 
   return tokens;
+}
+
+function isAmbiguousUsCityWithoutExplicitUsCountry(city, country) {
+  if (isLikelyUnitedStatesCountry(country) === true) return false;
+  return buildCityCandidateTokens(city).some((token) => AMBIGUOUS_US_CITY_TOKENS.has(token));
 }
 
 function resolveAirportFromRouteCities(eventCity, eventCountry, routesByDest) {
@@ -738,22 +746,25 @@ router.get('/feasible', async (req, res) => {
       }
 
       // Resolve city → airport and evaluate drive/flight travel options.
-      const isUnitedStatesEvent = isLikelyUnitedStatesCountry(event.country);
-      let destAirport = resolveAirport(event.city, { country: event.country });
+      const hasAmbiguousUsCity = isAmbiguousUsCityWithoutExplicitUsCountry(event.city, event.country);
+      const airportResolutionCountry = hasAmbiguousUsCity ? 'Canada' : event.country;
+      const isUnitedStatesEvent = hasAmbiguousUsCity ? false : isLikelyUnitedStatesCountry(event.country);
+      const canUseNearestAirportFallback = !hasAmbiguousUsCity && isUnitedStatesEvent !== false;
+      let destAirport = resolveAirport(event.city, { country: airportResolutionCountry });
       let routeOptions = destAirport ? (routesByDest[destAirport] ?? []) : [];
       let isDriveReachable = isDriveReachableDestination(destAirport, originAirportSet);
 
       // Fallback for cities not covered by static airport mapping: infer airport
       // from destination_city values present in current route data.
       if (!destAirport || (routeOptions.length === 0 && !isDriveReachable)) {
-        const inferredAirport = resolveAirportFromRouteCities(event.city, event.country, routesByDest);
+        const inferredAirport = resolveAirportFromRouteCities(event.city, airportResolutionCountry, routesByDest);
         if (inferredAirport) {
           destAirport = inferredAirport;
           routeOptions = routesByDest[inferredAirport] ?? [];
           isDriveReachable = isDriveReachableDestination(destAirport, originAirportSet);
         }
       }
-      if (!destAirport || (routeOptions.length === 0 && !isDriveReachable)) {
+      if ((!destAirport || (routeOptions.length === 0 && !isDriveReachable)) && canUseNearestAirportFallback) {
         const nearestAirport = await resolveNearestAirportFromRoutes(
           event.city,
           event.country,
@@ -766,7 +777,7 @@ router.get('/feasible', async (req, res) => {
         }
       }
 
-      const isLocalDriveTrip = Boolean(destAirport && isDriveReachable && isUnitedStatesEvent !== false);
+      const isLocalDriveTrip = Boolean(destAirport && isDriveReachable && isUnitedStatesEvent !== false && !hasAmbiguousUsCity);
       const driveOriginAirport = isLocalDriveTrip
         ? pickDriveOriginAirport(destAirport, normalizedOriginAirports)
         : null;
@@ -913,3 +924,7 @@ router.get('/feasible', async (req, res) => {
 });
 
 module.exports = router;
+module.exports._private = {
+  buildCityCandidateTokens,
+  isAmbiguousUsCityWithoutExplicitUsCountry,
+};

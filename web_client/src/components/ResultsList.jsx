@@ -238,7 +238,7 @@ export default function ResultsList({ formData }) {
 
             const prize_score = hasPrizePool
                 ? norm(normalizedPrize, prizeMin, prizeMax)
-                : 0.5;
+                : 0;
             const travel_price_score = inverseNorm(
                 travelPriceValue,
                 travelPriceMin,
