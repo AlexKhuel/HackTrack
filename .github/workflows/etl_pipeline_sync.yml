@@ -1,34 +1,34 @@
 name: Run ETL Pipeline Sync
 
 on:
-  schedule:
-    # Run at 00:00 UTC every Sunday and Wednesday (twice a week)
-    - cron: "0 0 * * 0,3"
-  workflow_dispatch: # Allows manual triggering from the GitHub Actions UI
+    schedule:
+        # Run at 00:00 UTC every Sunday and Wednesday (twice a week)
+        - cron: "0 0 * * 0,3"
+    workflow_dispatch: # Allows manual triggering from the GitHub Actions UI
 
 jobs:
-  trigger-sync:
-    runs-on: ubuntu-latest
-    steps:
-      - name: Trigger API ETL Sync
-        env:
-          BACKEND_URL: ${{ secrets.BACKEND_API_URL }}
-          ADMIN_KEY: ${{ secrets.ADMIN_API_KEY }}
-        run: |
-          if [ -z "$BACKEND_URL" ]; then
-            echo "Error: BACKEND_API_URL secret is not set."
-            exit 1
-          fi
-          
-          if [ -z "$ADMIN_KEY" ]; then
-            echo "Error: ADMIN_API_KEY secret is not set."
-            exit 1
-          fi
+    trigger-sync:
+        runs-on: ubuntu-latest
+        steps:
+            - name: Trigger API ETL Sync
+              env:
+                  BACKEND_URL: ${{ secrets.BACKEND_API_URL }}
+                  ADMIN_KEY: ${{ secrets.ADMIN_API_KEY }}
+              run: |
+                  if [ -z "$BACKEND_URL" ]; then
+                    echo "Error: BACKEND_API_URL secret is not set."
+                    exit 1
+                  fi
 
-          echo "Hitting endpoint: $BACKEND_URL/api/admin/sync-events"
-          # Send a POST request and fail the workflow if the response code is > 400
-          curl -f -X POST "$BACKEND_URL/api/admin/sync-events" \
-            -H "Authorization: $ADMIN_KEY" \
-            -H "Content-Type: application/json"
-          
-          echo "\nSuccess! Pipeline sync initiated."
+                  if [ -z "$ADMIN_KEY" ]; then
+                    echo "Error: ADMIN_API_KEY secret is not set."
+                    exit 1
+                  fi
+
+                  echo "Hitting endpoint: $BACKEND_URL/api/admin/sync-events"
+                  # Send a POST request and fail the workflow if the response code is > 400
+                  curl -f -X POST "$BACKEND_URL/api/admin/sync-events" \
+                    -H "Authorization: $ADMIN_KEY" \
+                    -H "Content-Type: application/json"
+
+                  echo "\nSuccess! Pipeline sync initiated."
