@@ -12,6 +12,27 @@ function normalizeCityToken(value) {
   return normalized || null;
 }
 
+const US_COUNTRY_TOKENS = new Set([
+  'united states',
+  'united states of america',
+  'us',
+  'usa',
+  'u s',
+  'u s a',
+  'america',
+]);
+
+function normalizeCountryToken(value) {
+  if (value == null) return null;
+  return normalizeCityToken(String(value));
+}
+
+function isUnitedStatesCountry(value) {
+  const token = normalizeCountryToken(value);
+  if (!token) return null;
+  return US_COUNTRY_TOKENS.has(token);
+}
+
 // City name (lowercase) → primary IATA airport code
 const CITY_TO_AIRPORT = {
   // Northeast
@@ -64,6 +85,7 @@ const CITY_TO_AIRPORT = {
   'seattle':             'SEA',
   'portland':            'PDX',
   'san diego':           'SAN',
+  'ontario':             'ONT',
   'las vegas':           'LAS',
   'salt lake city':      'SLC',
   // Common college towns
@@ -120,6 +142,7 @@ const AIRPORT_TO_CITY = Object.freeze({
   MIA: 'Miami',
   MSP: 'Minneapolis',
   OAK: 'Oakland',
+  ONT: 'Ontario',
   ORD: 'Chicago',
   PDX: 'Portland',
   PHL: 'Philadelphia',
@@ -162,6 +185,7 @@ const AIRPORT_TO_TIMEZONE = Object.freeze({
   MIA: 'America/New_York',
   MSP: 'America/Chicago',
   OAK: 'America/Los_Angeles',
+  ONT: 'America/Los_Angeles',
   ORD: 'America/Chicago',
   PDX: 'America/Los_Angeles',
   PHL: 'America/New_York',
@@ -182,10 +206,15 @@ const AIRPORT_TO_TIMEZONE = Object.freeze({
  * Resolve an event city string to an IATA airport code.
  *
  * @param {string} city  Raw city name from DB
+ * @param {Object|string|null} [options] Optional context
+ * @param {string|null} [options.country] Event country. When provided and not US, mapping is skipped.
  * @returns {string|null} IATA code or null if not found
  */
-function resolveAirport(city) {
+function resolveAirport(city, options = null) {
   if (!city) return null;
+  const country = typeof options === 'string' ? options : options?.country;
+  const isUnitedStates = isUnitedStatesCountry(country);
+  if (isUnitedStates === false) return null;
 
   const normalized = normalizeCityToken(city);
   if (!normalized) return null;
@@ -230,6 +259,12 @@ function resolveAirportTimezone(airportCode) {
   return AIRPORT_TO_TIMEZONE[String(airportCode).toUpperCase()] ?? null;
 }
 
+function normalizeAirportCode(value) {
+  if (value == null) return null;
+  const token = String(value).trim().toUpperCase();
+  return /^[A-Z]{3}$/.test(token) ? token : null;
+}
+
 /**
  * Check whether a user can afford to attend an event given their budget.
  *
@@ -262,9 +297,13 @@ function checkBudgetFeasibility(event, userParams, route) {
     lodging_nightly_rate = null,
     has_friend_in_city = false,
     travel_mode = 'flight',
+    destination_airport = null,
   } = userParams;
 
-  const destAirport = resolveAirport(event.city);
+  const explicitDestinationAirport = normalizeAirportCode(destination_airport);
+  const routeDestinationAirport = normalizeAirportCode(route?.destination_airport);
+  const mappedDestinationAirport = resolveAirport(event.city, { country: event.country });
+  const destAirport = explicitDestinationAirport || routeDestinationAirport || mappedDestinationAirport;
   const travelMode = String(travel_mode).toLowerCase() === 'drive' ? 'drive' : 'flight';
 
   if (!destAirport) {

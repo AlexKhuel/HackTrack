@@ -302,4 +302,70 @@ describe('checkTimeFeasibility', () => {
 
     expect(() => checkTimeFeasibility(event, user)).toThrow('Invalid avg_outbound_duration_minutes');
   });
+
+  // CASE 14: Missing both class constraints disables schedule filtering
+  test('missing Friday and Monday constraints skips class-time checks', () => {
+    const event = makeEvent({
+      startUTC: '2026-03-07T06:00:00.000Z',
+      endUTC: '2026-03-09T16:00:00.000Z',
+      timezone: 'UTC',
+    });
+    const user = makeUser({
+      fridayEnd: null,
+      mondayStart: null,
+      timezone: 'UTC',
+      outboundMinutes: 600,
+      returnMinutes: 600,
+    });
+
+    const result = checkTimeFeasibility(event, user);
+    expect(result.feasible).toBe(true);
+    expect(result.outbound_feasible).toBe(true);
+    expect(result.return_feasible).toBe(true);
+    expect(result.reason).toBeNull();
+  });
+
+  // CASE 15: Missing Monday constraint keeps only Friday departure check
+  test('missing Monday constraint enforces only Friday outbound check', () => {
+    const event = makeEvent({
+      startUTC: '2026-03-07T06:00:00.000Z',
+      endUTC: '2026-03-09T16:00:00.000Z',
+      timezone: 'UTC',
+    });
+    const user = makeUser({
+      fridayEnd: '23:00',
+      mondayStart: null,
+      timezone: 'UTC',
+      outboundMinutes: 600,
+      returnMinutes: 600,
+    });
+
+    const result = checkTimeFeasibility(event, user);
+    expect(result.feasible).toBe(false);
+    expect(result.outbound_feasible).toBe(false);
+    expect(result.return_feasible).toBe(true);
+    expect(result.reason).toContain('Outbound');
+  });
+
+  // CASE 16: Missing Friday constraint keeps only Monday return check
+  test('missing Friday constraint enforces only Monday return check', () => {
+    const event = makeEvent({
+      startUTC: '2026-03-07T18:00:00.000Z',
+      endUTC: '2026-03-08T23:00:00.000Z',
+      timezone: 'UTC',
+    });
+    const user = makeUser({
+      fridayEnd: null,
+      mondayStart: '09:00',
+      timezone: 'UTC',
+      outboundMinutes: 60,
+      returnMinutes: 720,
+    });
+
+    const result = checkTimeFeasibility(event, user);
+    expect(result.feasible).toBe(false);
+    expect(result.outbound_feasible).toBe(true);
+    expect(result.return_feasible).toBe(false);
+    expect(result.reason).toContain('Return');
+  });
 });

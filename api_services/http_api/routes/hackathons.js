@@ -16,11 +16,34 @@ const router = express.Router();
 const DATE_ONLY_RE = /^\d{4}-\d{2}-\d{2}$/;
 const DATE_TIME_WITH_TZ_RE = /^\d{4}-\d{2}-\d{2}[T\s]\d{2}:\d{2}(?::\d{2}(?:\.\d{1,6})?)?(?:Z|[+-]\d{2}:\d{2})$/;
 const MAX_ORIGIN_AIRPORTS = 3;
+const CITY_GEO_CACHE = new Map();
+const MAX_CITY_GEO_CACHE_ENTRIES = 5000;
+const GEO_TIMEOUT_MS = 3500;
+const GEO_RESULT_COUNT = 10;
+const DRIVE_AIRPORT_CLUSTERS = [
+  new Set(['LAX', 'SNA', 'LGB', 'ONT', 'BUR']),
+];
+const US_COUNTRY_TOKENS = new Set([
+  'united states',
+  'united states of america',
+  'us',
+  'usa',
+  'u s',
+  'u s a',
+  'america',
+]);
 
 function normalizeAirportCode(value) {
   if (typeof value !== 'string') return null;
   const code = value.trim().toUpperCase();
   return /^[A-Z]{3}$/.test(code) ? code : null;
+}
+
+function isLikelyUnitedStatesCountry(country) {
+  if (country == null) return null;
+  const token = normalizeCityToken(String(country));
+  if (!token) return null;
+  return US_COUNTRY_TOKENS.has(token);
 }
 
 function normalizeOriginAirports(query) {
@@ -84,6 +107,47 @@ function buildOriginAirportPriority(originAirports) {
 function normalizeNonNegativeNumber(value) {
   const asNum = Number(value);
   return Number.isFinite(asNum) && asNum >= 0 ? asNum : null;
+}
+
+function findDriveAirportCluster(airportCode) {
+  const normalized = normalizeAirportCode(airportCode);
+  if (!normalized) return null;
+  for (const cluster of DRIVE_AIRPORT_CLUSTERS) {
+    if (cluster.has(normalized)) return cluster;
+  }
+  return null;
+}
+
+function isDriveReachableDestination(destinationAirport, originAirportSet) {
+  const destination = normalizeAirportCode(destinationAirport);
+  if (!destination || !(originAirportSet instanceof Set) || originAirportSet.size === 0) {
+    return false;
+  }
+
+  if (originAirportSet.has(destination)) return true;
+
+  const destinationCluster = findDriveAirportCluster(destination);
+  if (!destinationCluster) return false;
+
+  for (const originAirport of originAirportSet) {
+    if (destinationCluster.has(originAirport)) return true;
+  }
+  return false;
+}
+
+function pickDriveOriginAirport(destinationAirport, normalizedOriginAirports) {
+  const destination = normalizeAirportCode(destinationAirport);
+  const origins = Array.isArray(normalizedOriginAirports) ? normalizedOriginAirports : [];
+  if (destination && origins.includes(destination)) return destination;
+
+  const destinationCluster = findDriveAirportCluster(destination);
+  if (destinationCluster) {
+    for (const originAirport of origins) {
+      if (destinationCluster.has(originAirport)) return originAirport;
+    }
+  }
+
+  return origins[0] ?? destination;
 }
 
 function sortRoutesForDestination(routes, originPriority) {
@@ -272,17 +336,226 @@ function hasFriendInDestinationCity(eventCity, routeDestinationCity, destAirport
   return candidates.some((cityToken) => friendCityTokens.has(cityToken));
 }
 
+function buildCityCandidateTokens(rawCity) {
+  const tokens = [];
+  const addToken = (raw) => {
+    const token = normalizeCityToken(raw);
+    if (!token || tokens.includes(token)) return;
+    tokens.push(token);
+  };
+
+  addToken(rawCity);
+  if (typeof rawCity === 'string') {
+    for (const segment of rawCity.split(/,|\/|\||@|(?:\s[-–—]\s)/)) {
+      addToken(segment);
+    }
+  }
+
+  return tokens;
+}
+
+function resolveAirportFromRouteCities(eventCity, eventCountry, routesByDest) {
+  if (isLikelyUnitedStatesCountry(eventCountry) === false) return null;
+
+  const cityTokens = buildCityCandidateTokens(eventCity);
+  if (!cityTokens.length) return null;
+
+  let partialMatch = null;
+
+  for (const [destinationAirport, destinationRoutes] of Object.entries(routesByDest ?? {})) {
+    const routeCityToken = normalizeCityToken(
+      destinationRoutes?.[0]?.destination_city ?? resolveAirportCity(destinationAirport)
+    );
+    if (!routeCityToken) continue;
+
+    if (cityTokens.includes(routeCityToken)) {
+      return destinationAirport;
+    }
+
+    for (const cityToken of cityTokens) {
+      if (routeCityToken.includes(cityToken) || cityToken.includes(routeCityToken)) {
+        const score = Math.min(routeCityToken.length, cityToken.length);
+        if (!partialMatch || score > partialMatch.score) {
+          partialMatch = { destinationAirport, score };
+        }
+      }
+    }
+  }
+
+  return partialMatch?.destinationAirport ?? null;
+}
+
+function toRadians(value) {
+  return (value * Math.PI) / 180;
+}
+
+function haversineDistanceKm(a, b) {
+  const earthRadiusKm = 6371;
+  const dLat = toRadians(b.lat - a.lat);
+  const dLon = toRadians(b.lon - a.lon);
+  const lat1 = toRadians(a.lat);
+  const lat2 = toRadians(b.lat);
+  const x = Math.sin(dLat / 2) ** 2
+    + Math.cos(lat1) * Math.cos(lat2) * Math.sin(dLon / 2) ** 2;
+  const y = 2 * Math.atan2(Math.sqrt(x), Math.sqrt(1 - x));
+  return earthRadiusKm * y;
+}
+
+function buildCityGeocodeQueries(city, country) {
+  const queries = [];
+  const seen = new Set();
+  const addQuery = (raw) => {
+    const text = String(raw ?? '').trim();
+    if (!text) return;
+    const key = text.toLowerCase();
+    if (seen.has(key)) return;
+    seen.add(key);
+    queries.push(text);
+  };
+
+  const normalizedCity = String(city ?? '').trim();
+  const normalizedCountry = String(country ?? '').trim();
+  if (!normalizedCity) return queries;
+
+  if (normalizedCountry) addQuery(`${normalizedCity}, ${normalizedCountry}`);
+  addQuery(normalizedCity);
+  for (const token of buildCityCandidateTokens(normalizedCity)) {
+    addQuery(token);
+  }
+
+  return queries;
+}
+
+async function fetchCityCoordinates(query) {
+  if (!query || typeof fetch !== 'function') return null;
+
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), GEO_TIMEOUT_MS);
+
+  try {
+    const url = `https://geocoding-api.open-meteo.com/v1/search?name=${encodeURIComponent(query)}&count=${GEO_RESULT_COUNT}&language=en&format=json`;
+    const response = await fetch(url, {
+      method: 'GET',
+      headers: {
+        Accept: 'application/json',
+      },
+      signal: controller.signal,
+    });
+    if (!response.ok) return null;
+
+    const payload = await response.json();
+    const candidates = Array.isArray(payload?.results) ? payload.results : [];
+    if (!candidates.length) return null;
+
+    // Prefer higher-confidence localities by population. This avoids ambiguous
+    // low-population matches (e.g., city names that exist in many states).
+    const best = [...candidates]
+      .sort((a, b) => {
+        const popA = Number(a?.population);
+        const popB = Number(b?.population);
+        const hasPopA = Number.isFinite(popA) ? popA : -1;
+        const hasPopB = Number.isFinite(popB) ? popB : -1;
+        if (hasPopA !== hasPopB) return hasPopB - hasPopA;
+        const featureA = String(a?.feature_code ?? '');
+        const featureB = String(b?.feature_code ?? '');
+        return featureB.localeCompare(featureA);
+      })[0];
+
+    const lat = Number(best?.latitude);
+    const lon = Number(best?.longitude);
+    if (!Number.isFinite(lat) || !Number.isFinite(lon)) return null;
+
+    return { lat, lon };
+  } catch {
+    return null;
+  } finally {
+    clearTimeout(timeoutId);
+  }
+}
+
+async function geocodeCityCoordinates(city, country = null) {
+  const cityToken = normalizeCityToken(city);
+  if (!cityToken) return null;
+  const countryToken = normalizeCityToken(country) ?? '';
+  const cacheKey = `${cityToken}|${countryToken}`;
+
+  if (CITY_GEO_CACHE.has(cacheKey)) {
+    return CITY_GEO_CACHE.get(cacheKey);
+  }
+
+  const pending = (async () => {
+    const queries = buildCityGeocodeQueries(city, country);
+    for (const query of queries) {
+      const coordinates = await fetchCityCoordinates(query);
+      if (coordinates) return coordinates;
+    }
+    return null;
+  })();
+
+  CITY_GEO_CACHE.set(cacheKey, pending);
+  let resolved = null;
+  try {
+    resolved = await pending;
+  } catch {
+    resolved = null;
+  }
+  CITY_GEO_CACHE.set(cacheKey, resolved);
+
+  if (CITY_GEO_CACHE.size > MAX_CITY_GEO_CACHE_ENTRIES) {
+    const oldestKey = CITY_GEO_CACHE.keys().next().value;
+    if (oldestKey !== undefined) CITY_GEO_CACHE.delete(oldestKey);
+  }
+
+  return resolved;
+}
+
+async function buildRouteDestinationGeoLookup(routesByDest) {
+  const entries = Object.entries(routesByDest ?? {});
+  const pairs = await Promise.all(entries.map(async ([destinationAirport, destinationRoutes]) => {
+    const destinationCity = destinationRoutes?.[0]?.destination_city ?? resolveAirportCity(destinationAirport);
+    const coordinates = await geocodeCityCoordinates(destinationCity, 'United States')
+      || await geocodeCityCoordinates(destinationCity, null);
+    return [destinationAirport, coordinates];
+  }));
+
+  const geoByAirport = {};
+  for (const [destinationAirport, coordinates] of pairs) {
+    if (!coordinates) continue;
+    geoByAirport[destinationAirport] = coordinates;
+  }
+  return geoByAirport;
+}
+
+async function resolveNearestAirportFromRoutes(eventCity, eventCountry, routeDestinationGeoByAirport) {
+  const eventCoordinates = await geocodeCityCoordinates(eventCity, eventCountry);
+  if (!eventCoordinates) return null;
+
+  let bestAirport = null;
+  let bestDistanceKm = Number.POSITIVE_INFINITY;
+  for (const [destinationAirport, destinationCoordinates] of Object.entries(routeDestinationGeoByAirport ?? {})) {
+    if (!destinationCoordinates) continue;
+    const distanceKm = haversineDistanceKm(eventCoordinates, destinationCoordinates);
+    if (!Number.isFinite(distanceKm)) continue;
+    if (distanceKm < bestDistanceKm) {
+      bestAirport = destinationAirport;
+      bestDistanceKm = distanceKm;
+    }
+  }
+
+  return bestAirport;
+}
+
 /**
  * GET /api/hackathons/feasible
  *
  * Required query params:
  *   origin_airport             - 1-3 IATA codes, supports repeated params or delimited string
- *   friday_last_class_end      - ISO 8601 datetime with explicit timezone
- *   monday_first_class_start   - ISO 8601 datetime with explicit timezone
  *   user_timezone              - IANA string, e.g. "America/New_York"
  *   budget                     - number (total all-in USD budget)
  *
  * Optional query params:
+ *   friday_last_class_end      - ISO 8601 datetime with explicit timezone
+ *   monday_first_class_start   - ISO 8601 datetime with explicit timezone
  *   include_lodging            - "true"|"false" (default: "true")
  *   friend_cities              - optional city list for free lodging if friend lives there
  *   date_range_start           - ISO 8601 datetime with explicit timezone
@@ -302,11 +575,12 @@ router.get('/feasible', async (req, res) => {
     date_range_end,
     max_flight_duration,
     min_prize_pool,
+    include_unmapped,
   } = req.query;
 
-  if (!friday_last_class_end || !monday_first_class_start || !user_timezone || !budget) {
+  if (!user_timezone || !budget) {
     return res.status(400).json({
-      error: 'Missing required query params: origin_airport, friday_last_class_end, monday_first_class_start, user_timezone, budget',
+      error: 'Missing required query params: origin_airport, user_timezone, budget',
     });
   }
 
@@ -323,6 +597,7 @@ router.get('/feasible', async (req, res) => {
 
   const budgetNum      = parseFloat(budget);
   const lodgingEnabled = include_lodging !== 'false';
+  const includeUnmapped = include_unmapped === 'true';
   const friendCitiesRaw = friend_cities ?? req.query['friend_cities[]'];
   const friendCityTokens = buildFriendCityTokenSet(friendCitiesRaw);
   const originAirportSet = new Set(normalizedOriginAirports);
@@ -352,10 +627,17 @@ router.get('/feasible', async (req, res) => {
   let mondayFirstClassStartHHMM;
   try {
     ensureValidTimezone(user_timezone);
-    const fridayLastClassBoundary = normalizeScheduleBoundary(friday_last_class_end, 'friday_last_class_end');
-    const mondayFirstClassBoundary = normalizeScheduleBoundary(monday_first_class_start, 'monday_first_class_start');
-    fridayLastClassEndHHMM = fridayLastClassBoundary.setZone(user_timezone).toFormat('HH:mm');
-    mondayFirstClassStartHHMM = mondayFirstClassBoundary.setZone(user_timezone).toFormat('HH:mm');
+    fridayLastClassEndHHMM = null;
+    mondayFirstClassStartHHMM = null;
+
+    if (friday_last_class_end != null && friday_last_class_end !== '') {
+      const fridayLastClassBoundary = normalizeScheduleBoundary(friday_last_class_end, 'friday_last_class_end');
+      fridayLastClassEndHHMM = fridayLastClassBoundary.setZone(user_timezone).toFormat('HH:mm');
+    }
+    if (monday_first_class_start != null && monday_first_class_start !== '') {
+      const mondayFirstClassBoundary = normalizeScheduleBoundary(monday_first_class_start, 'monday_first_class_start');
+      mondayFirstClassStartHHMM = mondayFirstClassBoundary.setZone(user_timezone).toFormat('HH:mm');
+    }
   } catch (err) {
     return res.status(400).json({ error: err.message });
   }
@@ -380,7 +662,7 @@ router.get('/feasible', async (req, res) => {
   try {
     // 1. Fetch in-person events
     const eventParams = [];
-    const eventWhere = ['in_person = TRUE'];
+    const eventWhere = ['in_person = TRUE', "LOWER(source) = 'mlh'"];
 
     if (normalizedDateRangeStart) {
       eventParams.push(normalizedDateRangeStart);
@@ -434,6 +716,7 @@ router.get('/feasible', async (req, res) => {
     for (const [destinationAirport, destinationRoutes] of Object.entries(routesByDest)) {
       routesByDest[destinationAirport] = sortRoutesForDestination(destinationRoutes, originAirportPriority);
     }
+    const routeDestinationGeoByAirport = await buildRouteDestinationGeoLookup(routesByDest);
 
     // 4. Run budget + time feasibility on each event
     const feasibleEvents = [];
@@ -455,11 +738,40 @@ router.get('/feasible', async (req, res) => {
       }
 
       // Resolve city → airport and evaluate drive/flight travel options.
-      const destAirport = resolveAirport(event.city);
-      const isLocalDriveTrip = Boolean(destAirport && originAirportSet.has(destAirport));
-      const routeOptions = destAirport ? (routesByDest[destAirport] ?? []) : [];
+      const isUnitedStatesEvent = isLikelyUnitedStatesCountry(event.country);
+      let destAirport = resolveAirport(event.city, { country: event.country });
+      let routeOptions = destAirport ? (routesByDest[destAirport] ?? []) : [];
+      let isDriveReachable = isDriveReachableDestination(destAirport, originAirportSet);
+
+      // Fallback for cities not covered by static airport mapping: infer airport
+      // from destination_city values present in current route data.
+      if (!destAirport || (routeOptions.length === 0 && !isDriveReachable)) {
+        const inferredAirport = resolveAirportFromRouteCities(event.city, event.country, routesByDest);
+        if (inferredAirport) {
+          destAirport = inferredAirport;
+          routeOptions = routesByDest[inferredAirport] ?? [];
+          isDriveReachable = isDriveReachableDestination(destAirport, originAirportSet);
+        }
+      }
+      if (!destAirport || (routeOptions.length === 0 && !isDriveReachable)) {
+        const nearestAirport = await resolveNearestAirportFromRoutes(
+          event.city,
+          event.country,
+          routeDestinationGeoByAirport
+        );
+        if (nearestAirport) {
+          destAirport = nearestAirport;
+          routeOptions = routesByDest[nearestAirport] ?? [];
+          isDriveReachable = isDriveReachableDestination(destAirport, originAirportSet);
+        }
+      }
+
+      const isLocalDriveTrip = Boolean(destAirport && isDriveReachable && isUnitedStatesEvent !== false);
+      const driveOriginAirport = isLocalDriveTrip
+        ? pickDriveOriginAirport(destAirport, normalizedOriginAirports)
+        : null;
       const travelCandidates = isLocalDriveTrip
-        ? [{ travel_mode: 'drive', origin_airport: destAirport, route: null }]
+        ? [{ travel_mode: 'drive', origin_airport: driveOriginAirport, route: null }]
         : routeOptions.map((routeOption) => ({
           travel_mode: 'flight',
           origin_airport: routeOption.origin_airport,
@@ -492,6 +804,7 @@ router.get('/feasible', async (req, res) => {
             lodging_nightly_rate: lodgingNightlyRate,
             has_friend_in_city: hasFriendInCity,
             travel_mode: travelMode,
+            destination_airport: destAirport,
           },
           route
         );
@@ -533,13 +846,41 @@ router.get('/feasible', async (req, res) => {
         break;
       }
 
-      if (!selectedOutcome) continue;
-
-      const selectedTravelMode = selectedOutcome.travel_mode;
-      const selectedRoute = selectedOutcome.route;
-      const selectedOriginAirport = selectedOutcome.origin_airport ?? normalizedOriginAirports[0];
+      const selectedTravelMode = selectedOutcome?.travel_mode ?? 'unknown';
+      const selectedRoute = selectedOutcome?.route ?? null;
+      const selectedOriginAirport = selectedOutcome?.origin_airport ?? normalizedOriginAirports[0];
       const originCity = selectedRoute?.origin_city ?? resolveAirportCity(selectedOriginAirport) ?? null;
       const destinationCity = selectedRoute?.destination_city ?? resolveAirportCity(destAirport) ?? event.city ?? null;
+
+      if (!selectedOutcome && includeUnmapped) {
+        feasibleEvents.push({
+          event: eventWithNormalizedDateTimes,
+          route: {
+            travel_mode:                      'unknown',
+            origin_airport:                   selectedOriginAirport,
+            origin_city:                      originCity,
+            destination_airport:             destAirport,
+            destination_city:                 destinationCity,
+            avg_outbound_price:              null,
+            avg_return_price:                null,
+            avg_outbound_duration_minutes:   null,
+            avg_return_duration_minutes:     null,
+          },
+          cost_estimate: {
+            estimated_flight_cost:   null,
+            estimated_lodging_cost:  null,
+            estimated_total_cost:    null,
+          },
+          time_feasibility: {
+            latest_departure_utc:        null,
+            earliest_return_arrival_utc: null,
+          },
+        });
+        continue;
+      }
+
+      if (!selectedOutcome) continue;
+
       feasibleEvents.push({
         event: eventWithNormalizedDateTimes,
         route: {

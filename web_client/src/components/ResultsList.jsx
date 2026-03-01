@@ -1,323 +1,589 @@
-import { useEffect, useMemo, useState } from "react"
-import { fetchFeasibleHackathons } from "../utils/api"
+import { useEffect, useMemo, useState } from "react";
+import { fetchFeasibleHackathons } from "../utils/api";
 
 const FILTER_INPUT =
-  "w-48 bg-[rgba(245,237,214,0.07)] border border-[var(--border)] rounded-[6px] px-3 py-2 text-[var(--cream)] outline-none focus:border-[var(--teal)] font-['Syne',sans-serif]"
-const FILTER_LABEL = "text-xs font-semibold uppercase tracking-[0.25em] text-[var(--muted)] font-['Space_Mono',monospace]"
+    "w-48 bg-[rgba(245,237,214,0.07)] border border-[var(--border)] rounded-[6px] px-3 py-2 text-[var(--cream)] outline-none focus:border-[var(--teal)] font-['Syne',sans-serif]";
+const FILTER_LABEL =
+    "text-xs font-semibold uppercase tracking-[0.25em] text-[var(--muted)] font-['Space_Mono',monospace]";
 
 function clamp01(x) {
-  if (!Number.isFinite(x)) return 0
-  return Math.max(0, Math.min(1, x))
+    if (!Number.isFinite(x)) return 0;
+    return Math.max(0, Math.min(1, x));
 }
 
 function norm(value, min, max) {
-  if (!Number.isFinite(value) || !Number.isFinite(min) || !Number.isFinite(max)) return 0
-  if (max === min) return 1
-  return clamp01((value - min) / (max - min))
+    if (
+        !Number.isFinite(value) ||
+        !Number.isFinite(min) ||
+        !Number.isFinite(max)
+    )
+        return 0;
+    if (max === min) return 1;
+    return clamp01((value - min) / (max - min));
+}
+
+function inverseNorm(value, min, max) {
+    if (
+        !Number.isFinite(value) ||
+        !Number.isFinite(min) ||
+        !Number.isFinite(max)
+    )
+        return 0;
+    if (max === min) return 1;
+    return clamp01((max - value) / (max - min));
 }
 
 function formatUSD(n) {
-  const num = Number(n)
-  if (!Number.isFinite(num)) return "$—"
-  return new Intl.NumberFormat(undefined, { style: "currency", currency: "USD", maximumFractionDigits: 0 }).format(num)
+    const num = Number(n);
+    if (!Number.isFinite(num)) return "$—";
+    return new Intl.NumberFormat(undefined, {
+        style: "currency",
+        currency: "USD",
+        maximumFractionDigits: 0,
+    }).format(num);
 }
 
-function formatDateRange(fromISO, toISO) {
-  if (!fromISO || !toISO) return "—"
-  const fmt = new Intl.DateTimeFormat(undefined, { month: "short", day: "numeric", year: "numeric" })
-  return `${fmt.format(new Date(fromISO))} – ${fmt.format(new Date(toISO))}`
+function formatDateRangeCompact(fromISO, toISO) {
+    if (!fromISO || !toISO) return "—";
+
+    const from = new Date(fromISO);
+    const to = new Date(toISO);
+    if (Number.isNaN(from.getTime()) || Number.isNaN(to.getTime())) return "—";
+
+    const sameMonth =
+        from.getMonth() === to.getMonth() &&
+        from.getFullYear() === to.getFullYear();
+    const fromFmt = new Intl.DateTimeFormat(undefined, {
+        month: "short",
+        day: "numeric",
+    });
+    const toFmt = new Intl.DateTimeFormat(undefined, {
+        month: sameMonth ? undefined : "short",
+        day: "numeric",
+    });
+    return `${fromFmt.format(from)}–${toFmt.format(to)}`;
+}
+
+function formatDurationHours(hours, fallback = "Unknown") {
+    if (hours == null || hours === "") return fallback;
+    const value = Number(hours);
+    if (!Number.isFinite(value) || value < 0) return fallback;
+    const totalMinutes = Math.round(value * 60);
+    if (totalMinutes === 0) return "Driving distance";
+    const wholeHours = Math.floor(totalMinutes / 60);
+    const minutes = totalMinutes % 60;
+    if (wholeHours === 0) return `${minutes}m`;
+    if (minutes === 0) return `${wholeHours}h`;
+    return `${wholeHours}h ${minutes}m`;
+}
+
+function formatTravelTimeLabel(eachWayHours, totalHours) {
+    if (Number.isFinite(eachWayHours)) {
+        const duration = formatDurationHours(eachWayHours);
+        return duration === "Driving distance"
+            ? duration
+            : `${duration} each way`;
+    }
+    const duration = formatDurationHours(totalHours);
+    return duration === "Driving distance" ? duration : `${duration} total`;
+}
+
+function formatPrizePool(value) {
+    const prize = Number(value);
+    if (!Number.isFinite(prize) || prize <= 0) return "Unknown";
+    return formatUSD(prize);
+}
+
+function normalizeScore(value) {
+    const score = Number(value);
+    if (!Number.isFinite(score)) return 0;
+    return Math.max(0, Math.min(1, score));
 }
 
 function splitFriendCities(text) {
-  if (Array.isArray(text)) {
-    return text
-      .map((entry) => (entry ?? "").toString().trim())
-      .filter(Boolean)
-  }
-  return (text ?? "")
-    .toString()
-    .split(",")
-    .map((s) => s.trim())
-    .filter(Boolean)
+    if (Array.isArray(text)) {
+        return text
+            .map((entry) => (entry ?? "").toString().trim())
+            .filter(Boolean);
+    }
+    return (text ?? "")
+        .toString()
+        .split(",")
+        .map((s) => s.trim())
+        .filter(Boolean);
 }
 
-function showClassConstraint(value) {
-  const text = (value ?? "").toString().trim()
-  return text || "none"
+function getOneWayTravelHours(hackathon) {
+    const outbound = Number(hackathon?.outbound_hours);
+    if (Number.isFinite(outbound) && outbound >= 0) return outbound;
+
+    // Fallback for legacy/partial payloads where only total travel is present.
+    const total = Number(hackathon?.travel_time_hours);
+    if (Number.isFinite(total) && total >= 0) return total / 2;
+
+    return null;
 }
 
-function showBudgetConstraint(value) {
-  const budget = Number(value)
-  if (!Number.isFinite(budget) || budget < 0) return "No budget cap"
-  return `Max $${Math.round(budget)}`
-}
-
-function showMaxTravelTimeConstraint(value) {
-  const minutes = Number(value)
-  if (!Number.isFinite(minutes) || minutes < 0) return "No one-way time cap"
-  const hours = minutes / 60
-  const rounded = Math.round(hours * 10) / 10
-  return `Max ${rounded}h one-way`
+function toFiniteNumberOrNull(value) {
+    if (value == null || value === "") return null;
+    const parsed = Number(value);
+    return Number.isFinite(parsed) ? parsed : null;
 }
 
 function mapFeasibleResult(result, index) {
-  const event = result?.event ?? {}
-  const route = result?.route ?? {}
-  const costEstimate = result?.cost_estimate ?? {}
+    const event = result?.event ?? {};
+    const route = result?.route ?? {};
+    const costEstimate = result?.cost_estimate ?? {};
 
-  const outboundMinutes = Number(route?.avg_outbound_duration_minutes)
-  const returnMinutes = Number(route?.avg_return_duration_minutes)
-  const totalTravelMinutes =
-    Number.isFinite(outboundMinutes) && Number.isFinite(returnMinutes)
-      ? outboundMinutes + returnMinutes
-      : null
+    const outboundMinutes = toFiniteNumberOrNull(
+        route?.avg_outbound_duration_minutes,
+    );
+    const returnMinutes = toFiniteNumberOrNull(
+        route?.avg_return_duration_minutes,
+    );
+    const totalTravelMinutes =
+        Number.isFinite(outboundMinutes) && Number.isFinite(returnMinutes)
+            ? outboundMinutes + returnMinutes
+            : null;
 
-  const estimatedCost = Number(costEstimate?.estimated_total_cost)
-  const prizePool = Number(event?.prize_pool)
+    const estimatedCost = toFiniteNumberOrNull(costEstimate?.estimated_total_cost);
+    const estimatedFlightCost = toFiniteNumberOrNull(
+        costEstimate?.estimated_flight_cost,
+    );
+    const prizePool = toFiniteNumberOrNull(event?.prize_pool);
 
-  return {
-    id: event?.id ?? `${event?.name ?? "event"}-${index}`,
-    name: event?.name ?? "Unknown event",
-    city: event?.city ?? "Unknown city",
-    from: event?.start_datetime_utc ?? null,
-    to: event?.end_datetime_utc ?? null,
-    estimated_cost: Number.isFinite(estimatedCost) ? estimatedCost : 0,
-    travel_time_hours: Number.isFinite(totalTravelMinutes) ? totalTravelMinutes / 60 : 0,
-    prize_pool: Number.isFinite(prizePool) ? prizePool : 0,
-    url: event?.url ?? "#",
-  }
+    return {
+        id: event?.id ?? `${event?.name ?? "event"}-${index}`,
+        name: event?.name ?? "Unknown event",
+        city: event?.city ?? "Unknown city",
+        from: event?.start_datetime_utc ?? null,
+        to: event?.end_datetime_utc ?? null,
+        estimated_cost: Number.isFinite(estimatedCost) ? estimatedCost : null,
+        estimated_flight_cost: Number.isFinite(estimatedFlightCost)
+            ? estimatedFlightCost
+            : null,
+        travel_time_hours: Number.isFinite(totalTravelMinutes)
+            ? totalTravelMinutes / 60
+            : null,
+        outbound_hours: Number.isFinite(outboundMinutes)
+            ? outboundMinutes / 60
+            : null,
+        return_hours: Number.isFinite(returnMinutes)
+            ? returnMinutes / 60
+            : null,
+        prize_pool: Number.isFinite(prizePool) ? prizePool : null,
+        url: event?.url ?? "#",
+    };
 }
 
 export default function ResultsList({ formData }) {
-  const friends = useMemo(() => splitFriendCities(formData?.friend_cities), [formData?.friend_cities])
-  const friendsLower = useMemo(() => friends.map((s) => s.toLowerCase()), [friends])
+    const friends = useMemo(
+        () => splitFriendCities(formData?.friend_cities),
+        [formData?.friend_cities],
+    );
+    const friendsLower = useMemo(
+        () => friends.map((s) => s.toLowerCase()),
+        [friends],
+    );
 
-  const [isLoading, setIsLoading] = useState(true)
-  const [errorText, setErrorText] = useState("")
-  const [hackathons, setHackathons] = useState([])
+    const [isLoading, setIsLoading] = useState(true);
+    const [errorText, setErrorText] = useState("");
+    const [hackathons, setHackathons] = useState([]);
 
-  const [maxFlightHours, setMaxFlightHours] = useState("6")
-  const [minPrizePool, setMinPrizePool] = useState("0")
+    const [maxOneWayHoursFilter, setMaxOneWayHoursFilter] = useState("");
+    const [minPrizePool, setMinPrizePool] = useState("");
+    const [showFilters, setShowFilters] = useState(false);
 
-  const scored = useMemo(() => {
-    if (!hackathons.length) return []
+    const scored = useMemo(() => {
+        if (!hackathons.length) return [];
 
-    const prizes = hackathons.map((h) => Number(h.prize_pool)).filter(Number.isFinite)
-    const ratios = hackathons
-      .map((h) => Number(h.prize_pool) / Math.max(1, Number(h.estimated_cost)))
-      .filter(Number.isFinite)
-    const travels = hackathons.map((h) => Number(h.travel_time_hours)).filter(Number.isFinite)
+        const prizes = hackathons
+            .map((h) => Number(h.prize_pool))
+            .filter((value) => Number.isFinite(value) && value > 0);
+        const travelPrices = hackathons
+            .map((h) => {
+                const flightCost = Number(h.estimated_flight_cost);
+                if (Number.isFinite(flightCost) && flightCost >= 0) {
+                    return flightCost;
+                }
+                const totalCost = Number(h.estimated_cost);
+                return Number.isFinite(totalCost) && totalCost >= 0
+                    ? totalCost
+                    : Number.NaN;
+            })
+            .filter(Number.isFinite);
+        const travels = hackathons
+            .map((h) => Number(h.travel_time_hours))
+            .filter(Number.isFinite);
 
-    const prizeMin = prizes.length ? Math.min(...prizes) : 0
-    const prizeMax = prizes.length ? Math.max(...prizes) : 0
-    const ratioMin = ratios.length ? Math.min(...ratios) : 0
-    const ratioMax = ratios.length ? Math.max(...ratios) : 0
-    const travelMin = travels.length ? Math.min(...travels) : 0
-    const travelMax = travels.length ? Math.max(...travels) : 0
+        const prizeMin = prizes.length ? Math.min(...prizes) : 0;
+        const prizeMax = prizes.length ? Math.max(...prizes) : 0;
+        const travelPriceMin = travelPrices.length ? Math.min(...travelPrices) : 0;
+        const travelPriceMax = travelPrices.length ? Math.max(...travelPrices) : 0;
+        const travelMin = travels.length ? Math.min(...travels) : 0;
+        const travelMax = travels.length ? Math.max(...travels) : 0;
 
-    return hackathons.map((h) => {
-      const prize_score = norm(h.prize_pool, prizeMin, prizeMax)
-      const prize_to_cost_score = norm(h.prize_pool / Math.max(1, h.estimated_cost), ratioMin, ratioMax)
-      const travel_time_score = 1 - norm(h.travel_time_hours, travelMin, travelMax)
-      const cityText = (h.city ?? "").toString().toLowerCase()
-      const friend_bonus_score = friendsLower.some((c) => cityText.includes(c)) ? 1 : 0
+        return hackathons.map((h) => {
+            const prizeValue = Number(h.prize_pool);
+            const hasPrizePool = Number.isFinite(prizeValue) && prizeValue > 0;
+            const normalizedPrize = hasPrizePool ? prizeValue : 0;
+            const flightCostValue = Number(h.estimated_flight_cost);
+            const totalCostValue = Number(h.estimated_cost);
+            const travelPriceValue =
+                Number.isFinite(flightCostValue) && flightCostValue >= 0
+                    ? flightCostValue
+                    : Number.isFinite(totalCostValue) && totalCostValue >= 0
+                      ? totalCostValue
+                      : null;
 
-      const composite =
-        0.35 * prize_score +
-        0.25 * prize_to_cost_score +
-        0.25 * travel_time_score +
-        0.15 * friend_bonus_score
-
-      return {
-        ...h,
-        scores: {
-          composite,
-        },
-      }
-    })
-  }, [hackathons, friendsLower])
-
-  const filteredAndSorted = useMemo(() => {
-    const maxH = Number(maxFlightHours)
-    const minP = Number(minPrizePool)
-
-    return scored
-      .filter((h) => {
-        const travelHours = Number(h.travel_time_hours)
-        if (!Number.isFinite(maxH)) return true
-        if (!Number.isFinite(travelHours)) return false
-        return travelHours <= maxH
-      })
-      .filter((h) => {
-        const prizePool = Number(h.prize_pool)
-        if (!Number.isFinite(minP)) return true
-        if (!Number.isFinite(prizePool)) return false
-        return prizePool >= minP
-      })
-      .sort((a, b) => b.scores.composite - a.scores.composite)
-  }, [scored, maxFlightHours, minPrizePool])
-
-  useEffect(() => {
-    const abortController = new AbortController()
-    setIsLoading(true)
-    setErrorText("")
-
-    fetchFeasibleHackathons(formData, { signal: abortController.signal })
-      .then((payload) => {
-        if (abortController.signal.aborted) return
-        const rawResults = Array.isArray(payload?.results) ? payload.results : []
-        setHackathons(rawResults.map((result, index) => mapFeasibleResult(result, index)))
-      })
-      .catch((error) => {
-        if (abortController.signal.aborted) return
-        setHackathons([])
-        setErrorText(error instanceof Error ? error.message : "unknown_error")
-      })
-      .finally(() => {
-        if (abortController.signal.aborted) return
-        setIsLoading(false)
-      })
-
-    return () => {
-      abortController.abort()
-    }
-  }, [formData])
-
-  const status = isLoading ? "loading" : errorText ? "error" : filteredAndSorted.length ? "ready" : "empty"
-
-  return (
-    <div className="w-full font-['Syne',sans-serif]">
-      <div className="flex items-end gap-6">
-        <div className="text-3xl font-black tracking-[-0.02em] sm:text-4xl">
-          {filteredAndSorted.length} HACKATHONS FOUND
-        </div>
-      </div>
-
-      <div className="mt-6 border-y border-white/10 py-4">
-        <div className="flex flex-col gap-6 sm:flex-row sm:items-end sm:justify-between">
-          <div className="flex flex-col gap-4 sm:flex-row sm:items-end">
-            <label className="block">
-              <div className={FILTER_LABEL}>
-                Max flight hours
-              </div>
-              <input
-                value={maxFlightHours}
-                onChange={(e) => setMaxFlightHours(e.target.value)}
-                inputMode="decimal"
-                placeholder="6"
-                className={FILTER_INPUT}
-              />
-            </label>
-
-            <label className="block">
-              <div className={FILTER_LABEL}>
-                Min prize pool
-              </div>
-              <input
-                value={minPrizePool}
-                onChange={(e) => setMinPrizePool(e.target.value)}
-                inputMode="numeric"
-                placeholder="0"
-                className={FILTER_INPUT}
-              />
-            </label>
-          </div>
-
-          <div className="text-xs font-semibold uppercase tracking-[0.25em] text-[rgba(245,237,214,0.4)] font-['Space_Mono',monospace]">
-            {formData?.primary_airport_code ? formData.primary_airport_code : "—"} •{" "}
-            {formData?.timezone || "Timezone unknown"} •{" "}
-            {formData?.country || "Country unknown"} •{" "}
-            {showBudgetConstraint(formData?.max_cost)} •{" "}
-            {showMaxTravelTimeConstraint(formData?.max_time)} •{" "}
-            Fri {showClassConstraint(formData?.friday_last_class)} • Mon {showClassConstraint(formData?.monday_first_class)} •{" "}
-            {friends.length ? `Friends: ${friends.join(", ")}` : "No friend cities"}
-          </div>
-        </div>
-      </div>
-
-      {status === "loading" ? (
-        <div className="grid min-h-[50vh] place-items-center">
-          <div className="text-4xl font-black tracking-[-0.02em]">SEARCHING...</div>
-        </div>
-      ) : null}
-
-      {status === "error" ? (
-        <div className="grid min-h-[50vh] place-items-center text-center">
-          <div>
-            <div className="text-4xl font-black tracking-[-0.02em] text-[#e4032e]">
-              SOMETHING WENT WRONG.
-            </div>
-            <div className="mt-3 text-xs font-semibold uppercase tracking-[0.25em] text-white/40">
-              {errorText || "unknown_error"}
-            </div>
-          </div>
-        </div>
-      ) : null}
-
-      {status === "empty" ? (
-        <div className="grid min-h-[50vh] place-items-center">
-          <div className="text-4xl font-black tracking-[-0.02em]">NO MATCHES FOUND.</div>
-        </div>
-      ) : null}
-
-      {status === "ready" ? (
-        <div className="mt-6 space-y-4">
-          {filteredAndSorted.map((h, idx) => {
-            const match = `${Math.round(h.scores.composite * 100)}% match`
-            return (
-              <article key={h.id} className="demo-card">
-                <div className="demo-card-header">
-                  <div>
-                    <div className="event-name">
-                      #{idx + 1} · {h.name}
-                    </div>
-                    <div className="event-city">
-                      📍 {h.city} · {formatDateRange(h.from, h.to)}
-                    </div>
-                  </div>
-                  <div className="score-badge">{match}</div>
-                </div>
-
-                <div className="demo-meta">
-                  <div className="meta-item">
-                    <div className="meta-label">Est. Cost</div>
-                    <div className="meta-value gold">{formatUSD(h.estimated_cost)}</div>
-                  </div>
-                  <div className="meta-item">
-                    <div className="meta-label">Travel Time</div>
-                    <div className="meta-value">{`${h.travel_time_hours.toFixed(1)}h`}</div>
-                  </div>
-                  <div className="meta-item">
-                    <div className="meta-label">Prize Pool</div>
-                    <div className="meta-value gold">{formatUSD(h.prize_pool)}</div>
-                  </div>
-                  <div className="meta-item">
-                    <div className="meta-label">Friend Nearby</div>
-                    <div className={`meta-value ${friends.length ? "green" : ""}`}>
-                      {friends.length ? "Possible couch" : "None known"}
-                    </div>
-                  </div>
-                </div>
-
-                <div className="mt-3 flex items-center justify-between text-xs">
-                  <div className="text-[var(--muted)] font-['Space_Mono',monospace]">
-                    Match factors: prize, ROI, travel, friends
-                  </div>
-                  <a
-                    href={h.url}
-                    target="_blank"
-                    rel="noreferrer"
-                    className="btn-ghost"
-                    style={{ padding: "0.4rem 1rem", fontSize: "0.8rem" }}
-                  >
-                    View Event →
-                  </a>
-                </div>
-              </article>
+            const prize_score = hasPrizePool
+                ? norm(normalizedPrize, prizeMin, prizeMax)
+                : 0.5;
+            const travel_price_score = inverseNorm(
+                travelPriceValue,
+                travelPriceMin,
+                travelPriceMax,
+            );
+            const travel_time_score = inverseNorm(
+                h.travel_time_hours,
+                travelMin,
+                travelMax,
+            );
+            const cityText = (h.city ?? "").toString().toLowerCase();
+            const friend_bonus_score = friendsLower.some((c) =>
+                cityText.includes(c),
             )
-          })}
+                ? 1
+                : 0;
+
+            const composite =
+                0.35 * prize_score +
+                0.25 * travel_price_score +
+                0.25 * travel_time_score +
+                0.15 * friend_bonus_score;
+
+            return {
+                ...h,
+                scores: {
+                    composite,
+                    prize_score,
+                    travel_price_score,
+                    travel_time_score,
+                    friend_bonus_score,
+                },
+            };
+        });
+    }, [hackathons, friendsLower]);
+
+    const filteredAndSorted = useMemo(() => {
+        const maxHText = (maxOneWayHoursFilter ?? "").toString().trim();
+        const minPText = (minPrizePool ?? "").toString().trim();
+        const maxH = maxHText === "" ? null : Number(maxHText);
+        const minP = minPText === "" ? null : Number(minPText);
+
+        return scored
+            .filter((h) => {
+                if (!Number.isFinite(maxH)) return true;
+                const travelHours = getOneWayTravelHours(h);
+                if (!Number.isFinite(travelHours)) return false;
+                return travelHours <= maxH;
+            })
+            .filter((h) => {
+                if (!Number.isFinite(minP)) return true;
+                const prizePool = Number(h.prize_pool);
+                if (!Number.isFinite(prizePool) || prizePool <= 0)
+                    return minP <= 0;
+                return prizePool >= minP;
+            })
+            .sort((a, b) => b.scores.composite - a.scores.composite);
+    }, [scored, maxOneWayHoursFilter, minPrizePool]);
+
+    useEffect(() => {
+        const abortController = new AbortController();
+        setIsLoading(true);
+        setErrorText("");
+
+        fetchFeasibleHackathons(formData, { signal: abortController.signal })
+            .then((payload) => {
+                if (abortController.signal.aborted) return;
+                const rawResults = Array.isArray(payload?.results)
+                    ? payload.results
+                    : [];
+                setHackathons(
+                    rawResults.map((result, index) =>
+                        mapFeasibleResult(result, index),
+                    ),
+                );
+            })
+            .catch((error) => {
+                if (abortController.signal.aborted) return;
+                setHackathons([]);
+                setErrorText(
+                    error instanceof Error ? error.message : "unknown_error",
+                );
+            })
+            .finally(() => {
+                if (abortController.signal.aborted) return;
+                setIsLoading(false);
+            });
+
+        return () => {
+            abortController.abort();
+        };
+    }, [formData]);
+
+    const status = isLoading
+        ? "loading"
+        : errorText
+          ? "error"
+          : filteredAndSorted.length
+            ? "ready"
+            : "empty";
+
+    return (
+        <div className="w-full font-['Syne',sans-serif]">
+            <div className="flex items-end gap-6">
+                <div className="text-3xl font-black tracking-[-0.02em] sm:text-4xl">
+                    {filteredAndSorted.length} HACKATHONS FOUND
+                </div>
+            </div>
+
+            <div className="mt-6 border-y border-white/10 py-4">
+                <button
+                    type="button"
+                    onClick={() => setShowFilters((value) => !value)}
+                    className="mx-auto flex items-center justify-center gap-4 text-center"
+                >
+                    <span className="text-xs font-semibold uppercase tracking-[0.25em] text-[rgba(245,237,214,0.4)] font-['Space_Mono',monospace]">
+                        Filters
+                    </span>
+                    <span className="text-xs font-semibold uppercase tracking-[0.25em] text-[rgba(245,237,214,0.6)] font-['Space_Mono',monospace]">
+                        {showFilters ? "Hide" : "Show"}
+                    </span>
+                </button>
+
+                {showFilters ? (
+                    <div className="mt-4 flex w-full flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
+                        <label className="flex flex-col items-start text-left">
+                            <div className={FILTER_LABEL}>
+                                Max one-way travel time (hours)
+                            </div>
+                            <input
+                                value={maxOneWayHoursFilter}
+                                onChange={(e) =>
+                                    setMaxOneWayHoursFilter(e.target.value)
+                                }
+                                inputMode="decimal"
+                                placeholder="e.g. 6"
+                                className={FILTER_INPUT}
+                            />
+                        </label>
+
+                        <label className="flex flex-col items-start text-left sm:items-end sm:text-right">
+                            <div className={FILTER_LABEL}>Min prize pool</div>
+                            <input
+                                value={minPrizePool}
+                                onChange={(e) =>
+                                    setMinPrizePool(e.target.value)
+                                }
+                                inputMode="numeric"
+                                placeholder="0"
+                                className={FILTER_INPUT}
+                            />
+                        </label>
+                    </div>
+                ) : null}
+            </div>
+
+            {status === "loading" ? (
+                <div className="grid min-h-[50vh] place-items-center">
+                    <div className="text-4xl font-black tracking-[-0.02em]">
+                        SEARCHING...
+                    </div>
+                </div>
+            ) : null}
+
+            {status === "error" ? (
+                <div className="grid min-h-[50vh] place-items-center text-center">
+                    <div>
+                        <div className="text-4xl font-black tracking-[-0.02em] text-[#e4032e]">
+                            SOMETHING WENT WRONG.
+                        </div>
+                        <div className="mt-3 text-xs font-semibold uppercase tracking-[0.25em] text-white/40">
+                            {errorText || "unknown_error"}
+                        </div>
+                    </div>
+                </div>
+            ) : null}
+
+            {status === "empty" ? (
+                <div className="grid min-h-[50vh] place-items-center">
+                    <div className="text-4xl font-black tracking-[-0.02em]">
+                        NO MATCHES FOUND.
+                    </div>
+                </div>
+            ) : null}
+
+            {status === "ready" ? (
+                <div className="mt-6 space-y-4">
+                    {filteredAndSorted.map((h, idx) => {
+                        const compositeScore = normalizeScore(
+                            h.scores.composite,
+                        );
+                        const scoreOutOfTen = `${(compositeScore * 10).toFixed(1)}/10`;
+                        const prizeScore = normalizeScore(h.scores.prize_score);
+                        const travelPriceScore = normalizeScore(
+                            h.scores.travel_price_score,
+                        );
+                        const travelScore = normalizeScore(
+                            h.scores.travel_time_score,
+                        );
+                        const friendScore = normalizeScore(
+                            h.scores.friend_bonus_score,
+                        );
+                        const travelEachWay = h.outbound_hours;
+                        const travelEachWayLabel = formatTravelTimeLabel(
+                            travelEachWay,
+                            h.travel_time_hours,
+                        );
+                        const isFriendNearby = friendScore > 0;
+                        return (
+                            <article key={h.id} className="demo-card">
+                                <div className="demo-card-header">
+                                    <div>
+                                        <div className="event-name">
+                                            #{idx + 1} {h.name}
+                                        </div>
+                                        <div className="event-city">
+                                            📍 {h.city} ·{" "}
+                                            {formatDateRangeCompact(
+                                                h.from,
+                                                h.to,
+                                            )}
+                                        </div>
+                                    </div>
+                                    <div className="score-badge">
+                                        {scoreOutOfTen}
+                                    </div>
+                                </div>
+
+                                <div className="score-bars">
+                                    <div className="score-row">
+                                        <div className="score-row-meta">
+                                            <span>Prize Score</span>
+                                            <span>{`${(prizeScore * 10).toFixed(1)}/10`}</span>
+                                        </div>
+                                        <div className="bar-track">
+                                            <div
+                                                className="bar-fill bar-prize"
+                                                style={{
+                                                    width: `${Math.round(prizeScore * 100)}%`,
+                                                }}
+                                            />
+                                        </div>
+                                    </div>
+                                    <div className="score-row">
+                                        <div className="score-row-meta">
+                                            <span>Travel Price</span>
+                                            <span>{`${(travelPriceScore * 10).toFixed(1)}/10`}</span>
+                                        </div>
+                                        <div className="bar-track">
+                                            <div
+                                                className="bar-fill bar-roi"
+                                                style={{
+                                                    width: `${Math.round(travelPriceScore * 100)}%`,
+                                                }}
+                                            />
+                                        </div>
+                                    </div>
+                                    <div className="score-row">
+                                        <div className="score-row-meta">
+                                            <span>Travel Time</span>
+                                            <span>{`${(travelScore * 10).toFixed(1)}/10`}</span>
+                                        </div>
+                                        <div className="bar-track">
+                                            <div
+                                                className="bar-fill bar-travel"
+                                                style={{
+                                                    width: `${Math.round(travelScore * 100)}%`,
+                                                }}
+                                            />
+                                        </div>
+                                    </div>
+                                    <div className="score-row">
+                                        <div className="score-row-meta">
+                                            <span>Friend Bonus</span>
+                                            <span>{`${(friendScore * 10).toFixed(1)}/10${isFriendNearby ? " ★" : ""}`}</span>
+                                        </div>
+                                        <div className="bar-track">
+                                            <div
+                                                className="bar-fill bar-friend"
+                                                style={{
+                                                    width: `${Math.round(friendScore * 100)}%`,
+                                                }}
+                                            />
+                                        </div>
+                                    </div>
+                                </div>
+
+                                <div className="demo-meta">
+                                    <div className="meta-item">
+                                        <div className="meta-label">
+                                            Est Cost
+                                        </div>
+                                        <div className="meta-value gold">{`${formatUSD(h.estimated_flight_cost ?? h.estimated_cost)} round trip`}</div>
+                                    </div>
+                                    <div className="meta-item">
+                                        <div className="meta-label">Travel</div>
+                                        <div className="meta-value">
+                                            {travelEachWayLabel}
+                                        </div>
+                                    </div>
+                                    <div className="meta-item">
+                                        <div className="meta-label">
+                                            Prize Pool
+                                        </div>
+                                        <div className="meta-value gold">
+                                            {formatPrizePool(h.prize_pool)}
+                                        </div>
+                                    </div>
+                                    <div className="meta-item">
+                                        <div className="meta-label">
+                                            Friend Nearby
+                                        </div>
+                                        <div
+                                            className={`meta-value ${isFriendNearby ? "green" : ""}`}
+                                        >
+                                            {isFriendNearby
+                                                ? "✓ Possible couch"
+                                                : "None known"}
+                                        </div>
+                                    </div>
+                                </div>
+
+                                <div className="mt-3 flex items-center justify-between text-xs">
+                                    <div className="text-[var(--muted)] font-['Space_Mono',monospace]">
+                                        Match factors: prize, travel price,
+                                        travel, friends
+                                    </div>
+                                    <a
+                                        href={h.url}
+                                        target="_blank"
+                                        rel="noreferrer"
+                                        className="btn-ghost"
+                                        style={{
+                                            padding: "0.4rem 1rem",
+                                            fontSize: "0.8rem",
+                                        }}
+                                    >
+                                        View Event →
+                                    </a>
+                                </div>
+                            </article>
+                        );
+                    })}
+                </div>
+            ) : null}
         </div>
-      ) : null}
-    </div>
-  )
+    );
 }

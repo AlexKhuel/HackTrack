@@ -1,6 +1,4 @@
 const DEFAULT_BUDGET = 1_000_000
-const DEFAULT_FRIDAY_LAST_CLASS_LOCAL = "00:00:00"
-const DEFAULT_MONDAY_FIRST_CLASS_LOCAL = "23:59:00"
 
 function pad2(value) {
   return String(value).padStart(2, "0")
@@ -134,12 +132,16 @@ function utcClockToLocalClock(utcClock, referenceDate, timeZone) {
   return { hour: local.hour, minute: local.minute, second: local.second }
 }
 
-function buildScheduleBoundaryIso(utcClockValue, fallbackLocalClockValue, referenceDate, timeZone) {
-  const utcClock = parseClock(utcClockValue)
-  const localClock = utcClock
-    ? utcClockToLocalClock(utcClock, referenceDate, timeZone)
-    : parseClock(fallbackLocalClockValue)
+function buildScheduleBoundaryIso(utcClockValue, referenceDate, timeZone, fieldName) {
+  const raw = (utcClockValue ?? "").toString().trim()
+  if (!raw) return null
 
+  const utcClock = parseClock(raw)
+  if (!utcClock) {
+    throw new Error(`Invalid ${fieldName} value`)
+  }
+
+  const localClock = utcClockToLocalClock(utcClock, referenceDate, timeZone)
   if (!localClock) return null
   return buildIsoFromLocalDateTime(referenceDate, localClock, timeZone)
 }
@@ -181,12 +183,16 @@ function normalizeFriendCities(value) {
 }
 
 function toPositiveNumber(value) {
-  const num = Number(value)
+  const text = (value ?? "").toString().trim()
+  if (!text) return null
+  const num = Number(text)
   return Number.isFinite(num) && num > 0 ? num : null
 }
 
 function toNonNegativeNumber(value) {
-  const num = Number(value)
+  const text = (value ?? "").toString().trim()
+  if (!text) return null
+  const num = Number(text)
   return Number.isFinite(num) && num >= 0 ? num : null
 }
 
@@ -206,6 +212,19 @@ function getUserTimeZone(formData) {
   return "UTC"
 }
 
+function isoNowInTimeZone(timeZone) {
+  const now = new Date()
+  const zoned = getZonedDateParts(now, timeZone)
+  if (!zoned) return now.toISOString()
+
+  const offset = getTimeZoneOffsetMinutes(timeZone, now)
+  if (offset == null) return now.toISOString()
+
+  const datePart = `${zoned.year}-${pad2(zoned.month)}-${pad2(zoned.day)}`
+  const timePart = `${pad2(zoned.hour)}:${pad2(zoned.minute)}:${pad2(zoned.second)}`
+  return `${datePart}T${timePart}${formatOffset(offset)}`
+}
+
 async function fetchFeasibleHackathons(formData, options = {}) {
   const userTimezone = getUserTimeZone(formData)
   const origins = collectOriginAirports(formData)
@@ -221,20 +240,16 @@ async function fetchFeasibleHackathons(formData, options = {}) {
 
   const fridayLastClassEnd = buildScheduleBoundaryIso(
     formData?.friday_last_class,
-    DEFAULT_FRIDAY_LAST_CLASS_LOCAL,
     referenceDates.friday,
-    userTimezone
+    userTimezone,
+    "friday_last_class"
   )
   const mondayFirstClassStart = buildScheduleBoundaryIso(
     formData?.monday_first_class,
-    DEFAULT_MONDAY_FIRST_CLASS_LOCAL,
     referenceDates.monday,
-    userTimezone
+    userTimezone,
+    "monday_first_class"
   )
-
-  if (!fridayLastClassEnd || !mondayFirstClassStart) {
-    throw new Error("Could not normalize class schedule constraints")
-  }
 
   const params = new URLSearchParams()
   for (const airport of origins) {
@@ -244,12 +259,28 @@ async function fetchFeasibleHackathons(formData, options = {}) {
   const budget = toPositiveNumber(formData?.max_cost) ?? DEFAULT_BUDGET
   params.set("budget", String(budget))
   params.set("user_timezone", userTimezone)
-  params.set("friday_last_class_end", fridayLastClassEnd)
-  params.set("monday_first_class_start", mondayFirstClassStart)
+  if (fridayLastClassEnd) {
+    params.set("friday_last_class_end", fridayLastClassEnd)
+  }
+  if (mondayFirstClassStart) {
+    params.set("monday_first_class_start", mondayFirstClassStart)
+  }
+  params.set("date_range_start", isoNowInTimeZone(userTimezone))
 
   const maxFlightDuration = toNonNegativeNumber(formData?.max_time)
   if (maxFlightDuration != null) {
     params.set("max_flight_duration", String(maxFlightDuration))
+  }
+
+  // If user left budget + travel + class timing blank, return all upcoming events,
+  // even when route/cost metadata is missing.
+  const unconstrainedSearch =
+    toPositiveNumber(formData?.max_cost) == null &&
+    maxFlightDuration == null &&
+    fridayLastClassEnd == null &&
+    mondayFirstClassStart == null
+  if (unconstrainedSearch) {
+    params.set("include_unmapped", "true")
   }
 
   const friendCities = normalizeFriendCities(formData?.friend_cities)

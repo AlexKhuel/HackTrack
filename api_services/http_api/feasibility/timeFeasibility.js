@@ -18,6 +18,20 @@ function parseHHMM(hhmm) {
   return { hour, minute };
 }
 
+function formatHHMM({ hour, minute }) {
+  return `${String(hour).padStart(2, '0')}:${String(minute).padStart(2, '0')}`;
+}
+
+function normalizeOptionalHHMM(value, fieldName) {
+  const text = String(value ?? '').trim();
+  if (!text) return null;
+  try {
+    return formatHHMM(parseHHMM(text));
+  } catch {
+    throw new Error(`Invalid ${fieldName}: "${value}"`);
+  }
+}
+
 /**
  * Given any Luxon DateTime, return the Friday of its ISO calendar week.
  * ISO weekday: Mon=1 … Sun=7, so Fri=5.
@@ -138,26 +152,31 @@ function checkTimeFeasibility(event, userParams) {
   // Earliest time the user arrives back at their origin airport after the event ends
   const earliestReturnArrivalUTC = eventEndUTC.plus({ minutes: avg_return_duration_minutes });
 
-  // --- Find the relevant Friday (in the event's local timezone) ---
-  const eventStartLocal = eventStartUTC.setZone(event_timezone);
-  const relevantFriday  = fridayOfWeek(eventStartLocal);
+  const fridayConstraintHHMM = normalizeOptionalHHMM(friday_last_class_end, 'friday_last_class_end');
+  const mondayConstraintHHMM = normalizeOptionalHHMM(monday_first_class_start, 'monday_first_class_start');
 
-  // Build the Friday class deadline in UTC (using user's timezone for the HH:MM)
-  const fridayDeadlineUTC = buildLocalDateTime(relevantFriday, friday_last_class_end, user_timezone);
+  let fridayDeadlineUTC = null;
+  if (fridayConstraintHHMM) {
+    const eventStartLocal = eventStartUTC.setZone(event_timezone);
+    const relevantFriday = fridayOfWeek(eventStartLocal);
+    fridayDeadlineUTC = buildLocalDateTime(relevantFriday, fridayConstraintHHMM, user_timezone);
+  }
 
-  // --- Find the relevant Monday (in the event's local timezone) ---
-  const eventEndLocal   = eventEndUTC.setZone(event_timezone);
-  const relevantMonday  = nextMonday(eventEndLocal);
-
-  // Build the Monday class deadline in UTC
-  const mondayDeadlineUTC = buildLocalDateTime(relevantMonday, monday_first_class_start, user_timezone);
+  let mondayDeadlineUTC = null;
+  if (mondayConstraintHHMM) {
+    const eventEndLocal = eventEndUTC.setZone(event_timezone);
+    const relevantMonday = nextMonday(eventEndLocal);
+    mondayDeadlineUTC = buildLocalDateTime(relevantMonday, mondayConstraintHHMM, user_timezone);
+  }
 
   // --- Feasibility checks (UTC millisecond comparison) ---
-  // Outbound: the latest possible departure must be at or after the user's last Friday class
-  const outboundFeasible = latestDepartureUTC.valueOf() >= fridayDeadlineUTC.valueOf();
+  // Outbound: the latest possible departure must be at or after the user's last Friday class.
+  // If no Friday constraint is provided, outbound is unconstrained.
+  const outboundFeasible = !fridayDeadlineUTC || latestDepartureUTC.valueOf() >= fridayDeadlineUTC.valueOf();
 
-  // Return: the earliest possible arrival home must be at or before Monday's first class
-  const returnFeasible = earliestReturnArrivalUTC.valueOf() <= mondayDeadlineUTC.valueOf();
+  // Return: the earliest possible arrival home must be at or before Monday's first class.
+  // If no Monday constraint is provided, return is unconstrained.
+  const returnFeasible = !mondayDeadlineUTC || earliestReturnArrivalUTC.valueOf() <= mondayDeadlineUTC.valueOf();
 
   const feasible = outboundFeasible && returnFeasible;
 

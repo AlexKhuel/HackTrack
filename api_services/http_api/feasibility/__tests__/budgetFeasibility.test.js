@@ -10,12 +10,16 @@ const {
 
 // ─── Fixtures ─────────────────────────────────────────────────────────────────
 
-function makeEvent(city) {
-  return { city };
+function makeEvent(city, country = null) {
+  return { city, country };
 }
 
-function makeRoute({ outbound = 200, return: ret = 180 } = {}) {
-  return { avg_outbound_price: outbound, avg_return_price: ret };
+function makeRoute({ outbound = 200, return: ret = 180, destinationAirport = null } = {}) {
+  return {
+    avg_outbound_price: outbound,
+    avg_return_price: ret,
+    destination_airport: destinationAirport,
+  };
 }
 
 // ─── resolveAirport ───────────────────────────────────────────────────────────
@@ -34,6 +38,13 @@ describe('resolveAirport', () => {
     expect(resolveAirport('DC')).toBe('DCA');
     expect(resolveAirport('Berkeley')).toBe('SFO');
     expect(resolveAirport('Irvine')).toBe('SNA');
+    expect(resolveAirport('Ontario')).toBe('ONT');
+  });
+
+  test('uses country to disambiguate US-only city mappings', () => {
+    expect(resolveAirport('Ontario', { country: 'United States' })).toBe('ONT');
+    expect(resolveAirport('Ontario', { country: 'Canada' })).toBeNull();
+    expect(resolveAirport('Cambridge', { country: 'United Kingdom' })).toBeNull();
   });
 
   test('returns null for unknown city', () => {
@@ -57,12 +68,14 @@ describe('airport metadata resolvers', () => {
   test('resolveAirportCity returns canonical city for known airport', () => {
     expect(resolveAirportCity('SFO')).toBe('San Francisco');
     expect(resolveAirportCity('sfo')).toBe('San Francisco');
+    expect(resolveAirportCity('ONT')).toBe('Ontario');
     expect(resolveAirportCity('ZZZ')).toBeNull();
   });
 
   test('resolveAirportTimezone returns timezone for known airport', () => {
     expect(resolveAirportTimezone('SFO')).toBe('America/Los_Angeles');
     expect(resolveAirportTimezone('JFK')).toBe('America/New_York');
+    expect(resolveAirportTimezone('ONT')).toBe('America/Los_Angeles');
     expect(resolveAirportTimezone('ZZZ')).toBeNull();
   });
 });
@@ -139,6 +152,41 @@ describe('checkBudgetFeasibility', () => {
     expect(result.reason).toContain('No airport mapping');
     expect(result.destination_airport).toBeNull();
     expect(result.estimated_total_cost).toBeNull();
+  });
+
+  test('unknown city with routed destination airport still evaluates budget', () => {
+    const result = checkBudgetFeasibility(
+      makeEvent('Hoboken'),
+      { budget: 500 },
+      makeRoute({ outbound: 120, return: 130, destinationAirport: 'ROC' })
+    );
+    expect(result.feasible).toBe(true);
+    expect(result.reason).toBeNull();
+    expect(result.destination_airport).toBe('ROC');
+    expect(result.estimated_total_cost).toBe(430);
+  });
+
+  test('non-US country does not use US city-to-airport mapping', () => {
+    const result = checkBudgetFeasibility(
+      makeEvent('Ontario', 'Canada'),
+      { budget: 1000 },
+      makeRoute()
+    );
+    expect(result.feasible).toBe(false);
+    expect(result.reason).toContain('No airport mapping');
+    expect(result.destination_airport).toBeNull();
+  });
+
+  test('non-US country can still use route-provided destination airport', () => {
+    const result = checkBudgetFeasibility(
+      makeEvent('Ontario', 'Canada'),
+      { budget: 500 },
+      makeRoute({ outbound: 120, return: 130, destinationAirport: 'YYZ' })
+    );
+    expect(result.feasible).toBe(true);
+    expect(result.reason).toBeNull();
+    expect(result.destination_airport).toBe('YYZ');
+    expect(result.estimated_total_cost).toBe(430);
   });
 
   // CASE 5: No route data → infeasible with descriptive reason
@@ -260,6 +308,19 @@ describe('checkBudgetFeasibility', () => {
     );
     expect(result.feasible).toBe(true);
     expect(result.destination_airport).toBe('SNA');
+    expect(result.estimated_flight_cost).toBe(0);
+    expect(result.estimated_lodging_cost).toBe(0);
+    expect(result.estimated_total_cost).toBe(0);
+  });
+
+  test('travel_mode: drive accepts explicit destination_airport fallback', () => {
+    const result = checkBudgetFeasibility(
+      makeEvent('Unknown Place'),
+      { budget: 25, include_lodging: true, travel_mode: 'drive', destination_airport: 'JFK' },
+      null
+    );
+    expect(result.feasible).toBe(true);
+    expect(result.destination_airport).toBe('JFK');
     expect(result.estimated_flight_cost).toBe(0);
     expect(result.estimated_lodging_cost).toBe(0);
     expect(result.estimated_total_cost).toBe(0);

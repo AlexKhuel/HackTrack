@@ -101,8 +101,8 @@ Returns feasible hackathons for a given user context.
 | Param | Required | Description |
 |---|---|---|
 | `origin_airport` | ✓ | 1-3 IATA codes (supports repeated params, comma-separated text, or JSON array), e.g. `LAX` |
-| `friday_last_class_end` | ✓ | ISO 8601 datetime with explicit timezone (`Z` or `±HH:MM`) |
-| `monday_first_class_start` | ✓ | ISO 8601 datetime with explicit timezone (`Z` or `±HH:MM`) |
+| `friday_last_class_end` | — | ISO 8601 datetime with explicit timezone (`Z` or `±HH:MM`); omit to skip Friday departure class constraint |
+| `monday_first_class_start` | — | ISO 8601 datetime with explicit timezone (`Z` or `±HH:MM`); omit to skip Monday return class constraint |
 | `user_timezone` | ✓ | IANA string, e.g. `America/New_York` |
 | `budget` | ✓ | Total all-in budget (USD) |
 | `include_lodging` | — | Default `true` |
@@ -122,7 +122,7 @@ Returns `{ "status": "ok" }`.
 
 ## Feasibility Logic
 
-**Time** — for each event, the app works backwards from the event start and end times to find the latest possible Friday departure and earliest possible Monday return. Both must fit within the user's class schedule. All timezone math is done in UTC via Luxon; DST-safe.
+**Time** — for each event, the app works backwards from the event start and end times to find the latest possible Friday departure and earliest possible Monday return. Each class boundary is optional; omitted Friday/Monday inputs disable that leg's class-time check. All timezone math is done in UTC via Luxon; DST-safe.
 
 **Budget** — maps the event city to an airport. If event airport matches any provided `origin_airport`, the trip is treated as local drive (`$0` travel, `$0` lodging). Otherwise the app uses route average outbound + return prices and `lodging.nightly_rate` when available (falling back to a flat `$90/night` estimate when missing). If `friend_cities` contains the destination city, lodging is treated as `$0`. The total must be within the user's budget.
 
@@ -141,3 +141,35 @@ npm --prefix etl_pipeline run pipeline:all
 ```
 
 Detailed implementation and CLI docs live in [`etl_pipeline/README.md`](etl_pipeline/README.md).
+
+---
+
+## Fresh Clone Setup
+
+If you delete and re-clone locally, run this to get back to a working state:
+
+```bash
+git clone <your-repo-url>
+cd Irvine-Hacks
+
+cp .env.example .env
+# Edit .env and set at least:
+# SUPABASE_DB_URL=...
+# AERODATABOX_API_KEY=...
+# Optional: PORT=3000, ADMIN_API_KEY=...
+
+npm --prefix api_services install
+npm --prefix web_client install
+npm --prefix etl_pipeline install
+
+python3 -m venv .venv
+source .venv/bin/activate
+pip install -r etl_pipeline/requirements.txt
+```
+
+Quick verification:
+
+```bash
+npm --prefix api_services test
+npm --prefix web_client run build
+```

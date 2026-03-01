@@ -34,7 +34,7 @@ import re
 import sys
 import time
 from collections import OrderedDict
-from datetime import datetime, timezone
+from datetime import datetime, time as wall_time, timezone
 from pathlib import Path
 from typing import Any
 from urllib.parse import urlparse, urlunparse
@@ -80,6 +80,12 @@ STRICT_CITY_ADDRESS_KEYS = ("city", "town", "village", "municipality")
 SECONDARY_CITY_ADDRESS_KEYS = ("hamlet",)
 NOMINATIM_SEARCH_URL = "https://nominatim.openstreetmap.org/search"
 LOOKUP_TOKEN_RE = re.compile(r"[A-Za-z0-9]+")
+DATE_ONLY_INPUT_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
+START_PLACEHOLDER_INPUT_RE = re.compile(r"^\d{4}-\d{2}-\d{2}[T ]00:00(?::00(?:\.\d{1,6})?)?$")
+END_PLACEHOLDER_INPUT_RE = re.compile(r"^\d{4}-\d{2}-\d{2}[T ]23:59(?::59(?:\.\d{1,6})?)?$")
+TZ_SUFFIX_RE = re.compile(r"(?:Z|[+-]\d{2}:\d{2})$")
+UNKNOWN_TIME_FALLBACK_START = wall_time(17, 0, 0)
+UNKNOWN_TIME_FALLBACK_END = wall_time(17, 0, 0)
 LOOKUP_STOPWORDS = {
     "the",
     "and",
@@ -375,10 +381,39 @@ def parse_isoish_datetime(value: Any) -> datetime | None:
     return None
 
 
-def to_utc_timestamp(value: Any) -> str | None:
+def should_infer_unknown_start_time(value: Any) -> bool:
+    text = normalize_space(None if value is None else str(value))
+    if not text:
+        return False
+    if DATE_ONLY_INPUT_RE.fullmatch(text):
+        return True
+    if TZ_SUFFIX_RE.search(text):
+        return False
+    return bool(START_PLACEHOLDER_INPUT_RE.fullmatch(text))
+
+
+def should_infer_unknown_end_time(value: Any) -> bool:
+    text = normalize_space(None if value is None else str(value))
+    if not text:
+        return False
+    if DATE_ONLY_INPUT_RE.fullmatch(text):
+        return True
+    if TZ_SUFFIX_RE.search(text):
+        return False
+    return bool(END_PLACEHOLDER_INPUT_RE.fullmatch(text))
+
+
+def to_utc_timestamp(value: Any, *, fallback_local_time: wall_time | None = None) -> str | None:
     dt = parse_isoish_datetime(value)
     if not dt:
         return None
+    if fallback_local_time is not None:
+        dt = dt.replace(
+            hour=fallback_local_time.hour,
+            minute=fallback_local_time.minute,
+            second=fallback_local_time.second,
+            microsecond=0,
+        )
     if dt.tzinfo is not None:
         dt = dt.astimezone(timezone.utc).replace(tzinfo=None)
     return dt.strftime("%Y-%m-%d %H:%M:%S")
@@ -950,40 +985,82 @@ def has_precise_end_time(value: str | None) -> bool:
     return dt.time().isoformat() != "23:59:59"
 
 
-def choose_start_datetime(left: str | None, right: str | None) -> str | None:
+def choose_start_datetime(
+    left: str | None,
+    right: str | None,
+    *,
+    left_inferred: bool = False,
+    right_inferred: bool = False,
+) -> tuple[str | None, bool]:
     if not left:
-        return right
+        return right, bool(right and right_inferred)
     if not right:
-        return left
+        return left, bool(left and left_inferred)
+
+    if left_inferred != right_inferred:
+        if right_inferred:
+            return left, left_inferred
+        return right, right_inferred
 
     left_precise = has_precise_start_time(left)
     right_precise = has_precise_start_time(right)
     if left_precise != right_precise:
-        return right if right_precise else left
+        if right_precise:
+            return right, right_inferred
+        return left, left_inferred
 
     left_dt = parse_output_datetime(left)
     right_dt = parse_output_datetime(right)
     if left_dt and right_dt:
-        return left if left_dt <= right_dt else right
-    return choose_text(left, right)
+        if left_dt <= right_dt:
+            return left, left_inferred
+        return right, right_inferred
+
+    chosen = choose_text(left, right)
+    if chosen == left and chosen != right:
+        return chosen, left_inferred
+    if chosen == right and chosen != left:
+        return chosen, right_inferred
+    return chosen, left_inferred and right_inferred
 
 
-def choose_end_datetime(left: str | None, right: str | None) -> str | None:
+def choose_end_datetime(
+    left: str | None,
+    right: str | None,
+    *,
+    left_inferred: bool = False,
+    right_inferred: bool = False,
+) -> tuple[str | None, bool]:
     if not left:
-        return right
+        return right, bool(right and right_inferred)
     if not right:
-        return left
+        return left, bool(left and left_inferred)
+
+    if left_inferred != right_inferred:
+        if right_inferred:
+            return left, left_inferred
+        return right, right_inferred
 
     left_precise = has_precise_end_time(left)
     right_precise = has_precise_end_time(right)
     if left_precise != right_precise:
-        return right if right_precise else left
+        if right_precise:
+            return right, right_inferred
+        return left, left_inferred
 
     left_dt = parse_output_datetime(left)
     right_dt = parse_output_datetime(right)
     if left_dt and right_dt:
-        return left if left_dt >= right_dt else right
-    return choose_text(left, right)
+        if left_dt >= right_dt:
+            return left, left_inferred
+        return right, right_inferred
+
+    chosen = choose_text(left, right)
+    if chosen == left and chosen != right:
+        return chosen, left_inferred
+    if chosen == right and chosen != left:
+        return chosen, right_inferred
+    return chosen, left_inferred and right_inferred
 
 
 def choose_in_person(left: bool | None, right: bool | None) -> bool | None:
@@ -1018,11 +1095,17 @@ def merge_records(left: dict[str, Any], right: dict[str, Any]) -> dict[str, Any]
     merged["city"] = choose_text(left.get("city"), right.get("city"))
     merged["_raw_city"] = choose_text(left.get("_raw_city"), right.get("_raw_city"))
     merged["country"] = choose_text(left.get("country"), right.get("country"))
-    merged["start_datetime_utc"] = choose_start_datetime(
-        left.get("start_datetime_utc"), right.get("start_datetime_utc")
+    merged["start_datetime_utc"], merged["_start_time_inferred"] = choose_start_datetime(
+        left.get("start_datetime_utc"),
+        right.get("start_datetime_utc"),
+        left_inferred=bool(left.get("_start_time_inferred")),
+        right_inferred=bool(right.get("_start_time_inferred")),
     )
-    merged["end_datetime_utc"] = choose_end_datetime(
-        left.get("end_datetime_utc"), right.get("end_datetime_utc")
+    merged["end_datetime_utc"], merged["_end_time_inferred"] = choose_end_datetime(
+        left.get("end_datetime_utc"),
+        right.get("end_datetime_utc"),
+        left_inferred=bool(left.get("_end_time_inferred")),
+        right_inferred=bool(right.get("_end_time_inferred")),
     )
     merged["in_person"] = choose_in_person(left.get("in_person"), right.get("in_person"))
 
@@ -1062,17 +1145,28 @@ def normalize_scraped_row(row: dict[str, Any], source: str) -> dict[str, Any] | 
     if city and not is_city_like_name(city):
         city = None
 
+    start_time_inferred = should_infer_unknown_start_time(start_raw)
+    end_time_inferred = should_infer_unknown_end_time(end_raw)
+
     normalized: dict[str, Any] = {
         "source": source,
         "name": name,
         "city": city,
         "_raw_city": raw_city,
         "country": country,
-        "start_datetime_utc": to_utc_timestamp(start_raw),
-        "end_datetime_utc": to_utc_timestamp(end_raw),
+        "start_datetime_utc": to_utc_timestamp(
+            start_raw,
+            fallback_local_time=UNKNOWN_TIME_FALLBACK_START if start_time_inferred else None,
+        ),
+        "end_datetime_utc": to_utc_timestamp(
+            end_raw,
+            fallback_local_time=UNKNOWN_TIME_FALLBACK_END if end_time_inferred else None,
+        ),
         "in_person": in_person,
         "prize_pool": parse_prize_pool(prize_raw),
         "url": url,
+        "_start_time_inferred": start_time_inferred,
+        "_end_time_inferred": end_time_inferred,
         "_sources": {source},
     }
 
