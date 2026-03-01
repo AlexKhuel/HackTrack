@@ -1,10 +1,21 @@
 import { useEffect, useMemo, useState } from "react";
 import { fetchFeasibleHackathons } from "../utils/api";
+import {
+    disconnectOpenNote,
+    exportHackathonToOpenNote,
+    fetchOpenNoteStatus,
+    startOpenNoteOAuth,
+} from "../utils/auth";
 
 const FILTER_INPUT =
     "w-48 bg-[rgba(245,237,214,0.07)] border border-[var(--border)] rounded-[6px] px-3 py-2 text-[var(--cream)] outline-none focus:border-[var(--teal)] font-['Syne',sans-serif]";
 const FILTER_LABEL =
     "text-xs font-semibold uppercase tracking-[0.25em] text-[var(--cream)] font-['Space_Mono',monospace]";
+const EXPORT_BUTTON =
+    "btn-ghost";
+const AUTH_STATUS = {
+    SIGNED_IN: "signed_in",
+};
 
 function SkeletonCard() {
     return (
@@ -199,6 +210,7 @@ function mapFeasibleResult(result, index) {
         id: event?.id ?? `${event?.name ?? "event"}-${index}`,
         name: event?.name ?? "Unknown event",
         city: event?.city ?? "Unknown city",
+        country: event?.country ?? null,
         from: event?.start_datetime_utc ?? null,
         to: event?.end_datetime_utc ?? null,
         estimated_cost: Number.isFinite(estimatedCost) ? estimatedCost : null,
@@ -219,10 +231,17 @@ function mapFeasibleResult(result, index) {
             : null,
         prize_pool: Number.isFinite(prizePool) ? prizePool : null,
         url: event?.url ?? "#",
+        raw_result: result,
     };
 }
 
-export default function ResultsList({ formData }) {
+export default function ResultsList({
+    formData,
+    authStatus,
+    sessionToken,
+    openNoteCallback,
+    onConsumeOpenNoteCallback,
+}) {
     const friends = useMemo(
         () => splitFriendCities(formData?.friend_cities),
         [formData?.friend_cities],
@@ -239,6 +258,17 @@ export default function ResultsList({ formData }) {
     const [maxOneWayHoursFilter, setMaxOneWayHoursFilter] = useState("");
     const [minPrizePool, setMinPrizePool] = useState("");
     const [showFilters, setShowFilters] = useState(false);
+    const [openNoteStatusLoading, setOpenNoteStatusLoading] = useState(false);
+    const [openNoteConnected, setOpenNoteConnected] = useState(false);
+    const [openNoteAccount, setOpenNoteAccount] = useState(null);
+    const [openNoteErrorText, setOpenNoteErrorText] = useState("");
+    const [openNoteConnectBusy, setOpenNoteConnectBusy] = useState(false);
+    const [disconnectBusy, setDisconnectBusy] = useState(false);
+    const [exportStates, setExportStates] = useState({});
+
+    const isSignedIn = authStatus === AUTH_STATUS.SIGNED_IN;
+    const callbackStatus = (openNoteCallback?.status ?? "").toString();
+    const callbackError = (openNoteCallback?.error ?? "").toString();
 
     const filteredAndSorted = useMemo(() => {
         const maxHText = (maxOneWayHoursFilter ?? "").toString().trim();
@@ -343,6 +373,7 @@ export default function ResultsList({ formData }) {
         const abortController = new AbortController();
         setIsLoading(true);
         setErrorText("");
+        setExportStates({});
 
         fetchFeasibleHackathons(formData, { signal: abortController.signal })
             .then((payload) => {
@@ -373,6 +404,134 @@ export default function ResultsList({ formData }) {
         };
     }, [formData]);
 
+    useEffect(() => {
+        if (!isSignedIn || !sessionToken) {
+            setOpenNoteConnected(false);
+            setOpenNoteAccount(null);
+            setOpenNoteStatusLoading(false);
+            setOpenNoteErrorText("");
+            return;
+        }
+
+        let cancelled = false;
+        setOpenNoteStatusLoading(true);
+        fetchOpenNoteStatus(sessionToken)
+            .then((payload) => {
+                if (cancelled) return;
+                setOpenNoteConnected(Boolean(payload?.connected));
+                setOpenNoteAccount(payload?.account ?? null);
+                setOpenNoteErrorText("");
+            })
+            .catch((err) => {
+                if (cancelled) return;
+                setOpenNoteConnected(false);
+                setOpenNoteAccount(null);
+                setOpenNoteErrorText(
+                    err instanceof Error
+                        ? err.message
+                        : "Failed to load OpenNote status.",
+                );
+            })
+            .finally(() => {
+                if (cancelled) return;
+                setOpenNoteStatusLoading(false);
+            });
+
+        return () => {
+            cancelled = true;
+        };
+    }, [isSignedIn, sessionToken, callbackStatus]);
+
+    useEffect(() => {
+        if (!callbackStatus) return;
+        const params = new URLSearchParams(window.location.search);
+        params.delete("opennote");
+        params.delete("opennote_error");
+        const next = `?${params.toString()}`;
+        window.history.replaceState({}, "", next === "?" ? window.location.pathname : next);
+        onConsumeOpenNoteCallback?.();
+    }, [callbackStatus, onConsumeOpenNoteCallback]);
+
+    const handleConnectOpenNote = async () => {
+        if (!isSignedIn || !sessionToken || openNoteConnectBusy) return;
+        setOpenNoteConnectBusy(true);
+        setOpenNoteErrorText("");
+        try {
+            const returnTo = `${window.location.pathname}${window.location.search}`;
+            const payload = await startOpenNoteOAuth(sessionToken, returnTo);
+            const authorizationUrl = (payload?.authorization_url ?? "")
+                .toString()
+                .trim();
+            if (!authorizationUrl) {
+                throw new Error("OpenNote OAuth URL was not returned by the server.");
+            }
+            window.location.assign(authorizationUrl);
+        } catch (err) {
+            setOpenNoteErrorText(
+                err instanceof Error
+                    ? err.message
+                    : "Failed to start OpenNote OAuth.",
+            );
+        } finally {
+            setOpenNoteConnectBusy(false);
+        }
+    };
+
+    const handleDisconnectOpenNote = async () => {
+        if (!isSignedIn || !sessionToken || disconnectBusy) return;
+        setDisconnectBusy(true);
+        setOpenNoteErrorText("");
+        try {
+            await disconnectOpenNote(sessionToken);
+            setOpenNoteConnected(false);
+            setOpenNoteAccount(null);
+        } catch (err) {
+            setOpenNoteErrorText(
+                err instanceof Error ? err.message : "Failed to disconnect OpenNote.",
+            );
+        } finally {
+            setDisconnectBusy(false);
+        }
+    };
+
+    const handleExportHackathon = async (hackathon) => {
+        const hackathonId = String(hackathon?.id ?? "");
+        if (!hackathonId || !isSignedIn || !sessionToken || !openNoteConnected) return;
+
+        setExportStates((prev) => ({
+            ...prev,
+            [hackathonId]: { status: "loading", message: "" },
+        }));
+
+        try {
+            const payload = await exportHackathonToOpenNote(
+                sessionToken,
+                hackathon?.raw_result,
+            );
+            const statusText =
+                payload?.status === "updated" ? "Updated in OpenNote." : "Saved to OpenNote.";
+            setExportStates((prev) => ({
+                ...prev,
+                [hackathonId]: {
+                    status: "success",
+                    message: statusText,
+                    journalUrl: payload?.journal_url || "",
+                },
+            }));
+        } catch (err) {
+            setExportStates((prev) => ({
+                ...prev,
+                [hackathonId]: {
+                    status: "error",
+                    message:
+                        err instanceof Error
+                            ? err.message
+                            : "Failed to export this hackathon.",
+                },
+            }));
+        }
+    };
+
     const status = isLoading
         ? "loading"
         : errorText
@@ -388,6 +547,58 @@ export default function ResultsList({ formData }) {
                     {filteredAndSorted.length} HACKATHONS FOUND
                 </div>
             </div>
+
+            {callbackStatus === "connected" ? (
+                <div className="mt-4 rounded-[8px] border border-[rgba(0,229,204,0.5)] bg-[rgba(0,229,204,0.12)] px-4 py-3 text-sm">
+                    OpenNote account connected. You can now export hackathons.
+                </div>
+            ) : null}
+
+            {callbackStatus === "error" ? (
+                <div className="mt-4 rounded-[8px] border border-[rgba(228,3,46,0.5)] bg-[rgba(228,3,46,0.12)] px-4 py-3 text-sm">
+                    OpenNote connection failed: {callbackError || "unknown_error"}
+                </div>
+            ) : null}
+
+            {isSignedIn ? (
+                <div className="mt-4 flex flex-wrap items-center gap-3 text-xs font-semibold uppercase tracking-[0.2em] text-[var(--muted)]">
+                    <span>
+                        {openNoteStatusLoading
+                            ? "Checking OpenNote..."
+                            : openNoteConnected
+                              ? `OpenNote connected${openNoteAccount?.name ? `: ${openNoteAccount.name}` : ""}`
+                              : "OpenNote not connected"}
+                    </span>
+                    {!openNoteStatusLoading && !openNoteConnected ? (
+                        <button
+                            type="button"
+                            onClick={handleConnectOpenNote}
+                            disabled={openNoteConnectBusy}
+                            className={EXPORT_BUTTON}
+                            style={{ padding: "0.35rem 0.8rem", fontSize: "0.72rem" }}
+                        >
+                            {openNoteConnectBusy ? "Connecting..." : "Connect OpenNote"}
+                        </button>
+                    ) : null}
+                    {!openNoteStatusLoading && openNoteConnected ? (
+                        <button
+                            type="button"
+                            onClick={handleDisconnectOpenNote}
+                            disabled={disconnectBusy}
+                            className={EXPORT_BUTTON}
+                            style={{ padding: "0.35rem 0.8rem", fontSize: "0.72rem" }}
+                        >
+                            {disconnectBusy ? "Disconnecting..." : "Disconnect"}
+                        </button>
+                    ) : null}
+                </div>
+            ) : null}
+
+            {openNoteErrorText ? (
+                <div className="mt-3 text-xs font-semibold uppercase tracking-[0.2em] text-[#e4032e]">
+                    {openNoteErrorText}
+                </div>
+            ) : null}
 
             <div className="mt-6 border-y border-white/10 py-4">
                 <button
@@ -506,6 +717,31 @@ export default function ResultsList({ formData }) {
                         const hotelShareSavingsLabel = formatUSD(
                             hotelShareSavings,
                         );
+                        const exportState = exportStates[h.id] ?? {
+                            status: "idle",
+                            message: "",
+                            journalUrl: "",
+                        };
+                        const isExporting = exportState.status === "loading";
+                        const canExportToOpenNote =
+                            isSignedIn &&
+                            openNoteConnected &&
+                            !openNoteStatusLoading;
+                        const exportButtonLabel = !isSignedIn
+                            ? "Sign in to export"
+                            : openNoteStatusLoading
+                              ? "Checking OpenNote..."
+                              : !openNoteConnected
+                                ? "Connect OpenNote"
+                                : isExporting
+                                  ? "Exporting..."
+                                  : "Add to OpenNote";
+                        const exportButtonDisabled =
+                            !isSignedIn ||
+                            openNoteStatusLoading ||
+                            isExporting ||
+                            openNoteConnectBusy ||
+                            disconnectBusy;
                         return (
                             <article
                                 key={h.id}
@@ -634,24 +870,73 @@ export default function ResultsList({ formData }) {
                                     </div>
                                 </div>
 
-                                <div className="mt-3 flex items-center justify-between text-xs">
+                                <div className="mt-3 flex flex-wrap items-center justify-between gap-3 text-xs">
                                     <div className="text-[var(--cream)] font-['Space_Mono',monospace]">
                                         Match factors: prize, travel price,
                                         travel, friends
                                     </div>
-                                    <a
-                                        href={h.url}
-                                        target="_blank"
-                                        rel="noreferrer"
-                                        className="btn-ghost"
-                                        style={{
-                                            padding: "0.4rem 1rem",
-                                            fontSize: "0.8rem",
-                                        }}
-                                    >
-                                        View Event →
-                                    </a>
+                                    <div className="flex flex-wrap items-center gap-2">
+                                        <button
+                                            type="button"
+                                            className="btn-ghost"
+                                            style={{
+                                                padding: "0.4rem 1rem",
+                                                fontSize: "0.8rem",
+                                                opacity: exportButtonDisabled ? 0.6 : 1,
+                                            }}
+                                            disabled={exportButtonDisabled}
+                                            onClick={() => {
+                                                if (!isSignedIn) return;
+                                                if (!openNoteConnected) {
+                                                    void handleConnectOpenNote();
+                                                    return;
+                                                }
+                                                if (!canExportToOpenNote) return;
+                                                void handleExportHackathon(h);
+                                            }}
+                                        >
+                                            {exportButtonLabel}
+                                        </button>
+                                        <a
+                                            href={h.url}
+                                            target="_blank"
+                                            rel="noreferrer"
+                                            className="btn-ghost"
+                                            style={{
+                                                padding: "0.4rem 1rem",
+                                                fontSize: "0.8rem",
+                                            }}
+                                        >
+                                            View Event →
+                                        </a>
+                                    </div>
                                 </div>
+
+                                {exportState.message ? (
+                                    <div
+                                        className={`mt-2 text-xs font-semibold uppercase tracking-[0.2em] ${
+                                            exportState.status === "error"
+                                                ? "text-[#e4032e]"
+                                                : "text-[var(--teal)]"
+                                        }`}
+                                    >
+                                        {exportState.message}
+                                        {exportState.status === "success" &&
+                                        exportState.journalUrl ? (
+                                            <>
+                                                {" "}
+                                                <a
+                                                    href={exportState.journalUrl}
+                                                    target="_blank"
+                                                    rel="noreferrer"
+                                                    className="underline"
+                                                >
+                                                    Open Journal
+                                                </a>
+                                            </>
+                                        ) : null}
+                                    </div>
+                                ) : null}
                             </article>
                         );
                     })}

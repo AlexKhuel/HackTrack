@@ -114,12 +114,58 @@ async function fetchLatestUserInput(token) {
   })
 }
 
+async function fetchOpenNoteStatus(token) {
+  return request("/api/opennote/status", {
+    method: "GET",
+    headers: {
+      Authorization: `Bearer ${token}`,
+    },
+  })
+}
+
+async function startOpenNoteOAuth(token, returnTo) {
+  return request("/api/opennote/oauth/start", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${token}`,
+    },
+    body: JSON.stringify({
+      return_to: (returnTo ?? "").toString(),
+    }),
+  })
+}
+
+async function disconnectOpenNote(token) {
+  return request("/api/opennote/disconnect", {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${token}`,
+    },
+  })
+}
+
+async function exportHackathonToOpenNote(token, result) {
+  return request("/api/opennote/export-hackathon", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${token}`,
+    },
+    body: JSON.stringify({ result }),
+  })
+}
+
 export {
   clearStoredSessionToken,
+  disconnectOpenNote,
+  exportHackathonToOpenNote,
   fetchLatestUserInput,
+  fetchOpenNoteStatus,
   fetchSessionUser,
   getStoredSessionToken,
   saveUserInput,
   setStoredSessionToken,
   signInWithGoogleCredential,
+  startOpenNoteOAuth,
 }
