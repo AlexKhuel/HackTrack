@@ -49,8 +49,8 @@ def get_users():
 
 #Receiving user inputs
 @app.get("/input")
-def score_events(user_id: int, max_cost: float, max_time: float):
-    return scored(user_id, max_cost, max_time)
+def score_events(user_id: int, max_cost: float, max_time: float, friend_cities: list[str]):
+    return scored(max_cost, max_time, friend_cities=friend_cities)
 #Update user info in the database
 
 @app.post("/update")
