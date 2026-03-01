@@ -61,7 +61,6 @@ Create `.env` in repo root (or copy `.env.example`):
 
 ```bash
 SUPABASE_DB_URL=postgres://...
-DATABASE_URL=postgres://...             # optional fallback
 EVENTS_TABLE=events                     # optional override
 ROUTES_TABLE=routes                     # optional override
 LODGING_TABLE=lodging                   # optional override
@@ -71,7 +70,6 @@ Resolution order in loaders:
 
 1. `--db-url`
 2. `SUPABASE_DB_URL`
-3. `DATABASE_URL`
 
 ## Quick start
 

@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react"
+import { fetchFeasibleHackathons } from "../utils/api"
 
 const FILTER_INPUT =
   "w-48 bg-[rgba(245,237,214,0.07)] border border-[var(--border)] rounded-[6px] px-3 py-2 text-[var(--cream)] outline-none focus:border-[var(--teal)] font-['Syne',sans-serif]"
@@ -59,91 +60,67 @@ function showMaxTravelTimeConstraint(value) {
   return `Max ${rounded}h one-way`
 }
 
-const MOCK_HACKATHONS = [
-  {
-    id: "hackmit",
-    name: "HackMIT",
-    city: "Cambridge, MA",
-    from: "2026-09-19",
-    to: "2026-09-20",
-    estimated_cost: 520,
-    travel_time_hours: 6.0,
-    prize_pool: 50000,
-    url: "https://hackmit.org/",
-  },
-  {
-    id: "calhacks",
-    name: "Cal Hacks",
-    city: "Berkeley, CA",
-    from: "2026-10-23",
-    to: "2026-10-25",
-    estimated_cost: 180,
-    travel_time_hours: 1.2,
-    prize_pool: 25000,
-    url: "https://calhacks.io/",
-  },
-  {
-    id: "hackgt",
-    name: "HackGT",
-    city: "Atlanta, GA",
-    from: "2026-10-02",
-    to: "2026-10-04",
-    estimated_cost: 420,
-    travel_time_hours: 4.8,
-    prize_pool: 35000,
-    url: "https://hack.gt/",
-  },
-  {
-    id: "pennapps",
-    name: "PennApps",
-    city: "Philadelphia, PA",
-    from: "2026-09-11",
-    to: "2026-09-13",
-    estimated_cost: 480,
-    travel_time_hours: 5.4,
-    prize_pool: 40000,
-    url: "https://pennapps.com/",
-  },
-  {
-    id: "treehacks",
-    name: "TreeHacks",
-    city: "Stanford, CA",
-    from: "2026-02-13",
-    to: "2026-02-15",
-    estimated_cost: 160,
-    travel_time_hours: 1.0,
-    prize_pool: 30000,
-    url: "https://www.treehacks.com/",
-  },
-]
+function mapFeasibleResult(result, index) {
+  const event = result?.event ?? {}
+  const route = result?.route ?? {}
+  const costEstimate = result?.cost_estimate ?? {}
+
+  const outboundMinutes = Number(route?.avg_outbound_duration_minutes)
+  const returnMinutes = Number(route?.avg_return_duration_minutes)
+  const totalTravelMinutes =
+    Number.isFinite(outboundMinutes) && Number.isFinite(returnMinutes)
+      ? outboundMinutes + returnMinutes
+      : null
+
+  const estimatedCost = Number(costEstimate?.estimated_total_cost)
+  const prizePool = Number(event?.prize_pool)
+
+  return {
+    id: event?.id ?? `${event?.name ?? "event"}-${index}`,
+    name: event?.name ?? "Unknown event",
+    city: event?.city ?? "Unknown city",
+    from: event?.start_datetime_utc ?? null,
+    to: event?.end_datetime_utc ?? null,
+    estimated_cost: Number.isFinite(estimatedCost) ? estimatedCost : 0,
+    travel_time_hours: Number.isFinite(totalTravelMinutes) ? totalTravelMinutes / 60 : 0,
+    prize_pool: Number.isFinite(prizePool) ? prizePool : 0,
+    url: event?.url ?? "#",
+  }
+}
 
 export default function ResultsList({ formData }) {
   const friends = useMemo(() => splitFriendCities(formData?.friend_cities), [formData?.friend_cities])
   const friendsLower = useMemo(() => friends.map((s) => s.toLowerCase()), [friends])
 
-  const [status, setStatus] = useState("loading") // loading | ready | empty | error
+  const [isLoading, setIsLoading] = useState(true)
   const [errorText, setErrorText] = useState("")
+  const [hackathons, setHackathons] = useState([])
 
   const [maxFlightHours, setMaxFlightHours] = useState("6")
   const [minPrizePool, setMinPrizePool] = useState("0")
 
   const scored = useMemo(() => {
-    const prizes = MOCK_HACKATHONS.map((h) => h.prize_pool)
-    const ratios = MOCK_HACKATHONS.map((h) => h.prize_pool / Math.max(1, h.estimated_cost))
-    const travels = MOCK_HACKATHONS.map((h) => h.travel_time_hours)
+    if (!hackathons.length) return []
 
-    const prizeMin = Math.min(...prizes)
-    const prizeMax = Math.max(...prizes)
-    const ratioMin = Math.min(...ratios)
-    const ratioMax = Math.max(...ratios)
-    const travelMin = Math.min(...travels)
-    const travelMax = Math.max(...travels)
+    const prizes = hackathons.map((h) => Number(h.prize_pool)).filter(Number.isFinite)
+    const ratios = hackathons
+      .map((h) => Number(h.prize_pool) / Math.max(1, Number(h.estimated_cost)))
+      .filter(Number.isFinite)
+    const travels = hackathons.map((h) => Number(h.travel_time_hours)).filter(Number.isFinite)
 
-    return MOCK_HACKATHONS.map((h) => {
+    const prizeMin = prizes.length ? Math.min(...prizes) : 0
+    const prizeMax = prizes.length ? Math.max(...prizes) : 0
+    const ratioMin = ratios.length ? Math.min(...ratios) : 0
+    const ratioMax = ratios.length ? Math.max(...ratios) : 0
+    const travelMin = travels.length ? Math.min(...travels) : 0
+    const travelMax = travels.length ? Math.max(...travels) : 0
+
+    return hackathons.map((h) => {
       const prize_score = norm(h.prize_pool, prizeMin, prizeMax)
       const prize_to_cost_score = norm(h.prize_pool / Math.max(1, h.estimated_cost), ratioMin, ratioMax)
       const travel_time_score = 1 - norm(h.travel_time_hours, travelMin, travelMax)
-      const friend_bonus_score = friendsLower.some((c) => h.city.toLowerCase().includes(c)) ? 1 : 0
+      const cityText = (h.city ?? "").toString().toLowerCase()
+      const friend_bonus_score = friendsLower.some((c) => cityText.includes(c)) ? 1 : 0
 
       const composite =
         0.35 * prize_score +
@@ -158,34 +135,55 @@ export default function ResultsList({ formData }) {
         },
       }
     })
-  }, [friendsLower])
+  }, [hackathons, friendsLower])
 
   const filteredAndSorted = useMemo(() => {
     const maxH = Number(maxFlightHours)
     const minP = Number(minPrizePool)
 
     return scored
-      .filter((h) => (Number.isFinite(maxH) ? h.travel_time_hours <= maxH : true))
-      .filter((h) => (Number.isFinite(minP) ? h.prize_pool >= minP : true))
+      .filter((h) => {
+        const travelHours = Number(h.travel_time_hours)
+        if (!Number.isFinite(maxH)) return true
+        if (!Number.isFinite(travelHours)) return false
+        return travelHours <= maxH
+      })
+      .filter((h) => {
+        const prizePool = Number(h.prize_pool)
+        if (!Number.isFinite(minP)) return true
+        if (!Number.isFinite(prizePool)) return false
+        return prizePool >= minP
+      })
       .sort((a, b) => b.scores.composite - a.scores.composite)
   }, [scored, maxFlightHours, minPrizePool])
 
   useEffect(() => {
-    setStatus("loading")
+    const abortController = new AbortController()
+    setIsLoading(true)
     setErrorText("")
 
-    const t = window.setTimeout(() => {
-      try {
-        if (!Array.isArray(filteredAndSorted)) throw new Error("results_not_array")
-        setStatus(filteredAndSorted.length ? "ready" : "empty")
-      } catch (e) {
-        setStatus("error")
-        setErrorText(e instanceof Error ? e.message : "unknown_error")
-      }
-    }, 450)
+    fetchFeasibleHackathons(formData, { signal: abortController.signal })
+      .then((payload) => {
+        if (abortController.signal.aborted) return
+        const rawResults = Array.isArray(payload?.results) ? payload.results : []
+        setHackathons(rawResults.map((result, index) => mapFeasibleResult(result, index)))
+      })
+      .catch((error) => {
+        if (abortController.signal.aborted) return
+        setHackathons([])
+        setErrorText(error instanceof Error ? error.message : "unknown_error")
+      })
+      .finally(() => {
+        if (abortController.signal.aborted) return
+        setIsLoading(false)
+      })
 
-    return () => window.clearTimeout(t)
-  }, [filteredAndSorted])
+    return () => {
+      abortController.abort()
+    }
+  }, [formData])
+
+  const status = isLoading ? "loading" : errorText ? "error" : filteredAndSorted.length ? "ready" : "empty"
 
   return (
     <div className="w-full font-['Syne',sans-serif]">

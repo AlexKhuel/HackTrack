@@ -5,12 +5,12 @@ import pandas as pd
 app = FastAPI()
 from dotenv import load_dotenv
 load_dotenv()
-DATABASE_URL = os.getenv("DATABASE_URL")
+SUPABASE_DB_URL = os.getenv("SUPABASE_DB_URL")
 
-if not DATABASE_URL:
-    raise ValueError("DATABASE_URL is not set")
+if not SUPABASE_DB_URL:
+    raise ValueError("SUPABASE_DB_URL is not set")
 
-engine = create_engine(DATABASE_URL)
+engine = create_engine(SUPABASE_DB_URL)
 
 def health_db_check():
     try:

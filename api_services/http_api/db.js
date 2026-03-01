@@ -1,16 +1,21 @@
 'use strict';
 
-require('dotenv').config();
-const { createClient } = require('@supabase/supabase-js');
+const path = require('path');
+require('dotenv').config({ path: path.resolve(__dirname, '../../.env') });
+const { Pool } = require('pg');
 
-const supabaseUrl = process.env.SUPABASE_URL;
-// Prefer service key (bypasses RLS, safe server-side); fall back to anon key.
-const supabaseKey = process.env.SUPABASE_SERVICE_KEY || process.env.SUPABASE_ANON_KEY;
-
-if (!supabaseUrl || !supabaseKey) {
-  throw new Error('Missing SUPABASE_URL and SUPABASE_SERVICE_KEY (or SUPABASE_ANON_KEY) in environment');
+const connectionString = process.env.SUPABASE_DB_URL;
+if (!connectionString) {
+  throw new Error('Missing SUPABASE_DB_URL in environment');
 }
 
-const supabase = createClient(supabaseUrl, supabaseKey);
+const hasLocalHost = /(?:localhost|127\.0\.0\.1)/i.test(connectionString);
+const pool = new Pool({
+  connectionString,
+  ssl: hasLocalHost ? undefined : { rejectUnauthorized: false },
+});
 
-module.exports = supabase;
+module.exports = {
+  query: (text, params) => pool.query(text, params),
+  pool,
+};

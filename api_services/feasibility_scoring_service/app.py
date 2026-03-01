@@ -28,7 +28,7 @@ def health_db():
 @app.get("/debug-env")
 
 def debug_env():
-    return {"database_url_set": bool(os.getenv("DATABASE_URL"))}
+    return {"supabase_db_url_set": bool(os.getenv("SUPABASE_DB_URL"))}
 
 @app.get("/events")
 def get_events():

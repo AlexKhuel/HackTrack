@@ -2,7 +2,7 @@
 
 const express = require('express');
 const { DateTime } = require('luxon');
-const supabase = require('../db');
+const db = require('../db');
 const { checkTimeFeasibility }                        = require('../feasibility/timeFeasibility');
 const {
   checkBudgetFeasibility,
@@ -143,7 +143,9 @@ function ensureValidTimezone(timezone) {
 
 function normalizeEventUtcDateTime(value) {
   if (value == null || value === '') return null;
-  const parsed = DateTime.fromISO(String(value), { zone: 'utc' });
+  const parsed = value instanceof Date
+    ? DateTime.fromJSDate(value, { zone: 'utc' })
+    : DateTime.fromISO(String(value), { zone: 'utc' });
   if (!parsed.isValid) return null;
   return parsed.toUTC().toISO();
 }
@@ -377,32 +379,44 @@ router.get('/feasible', async (req, res) => {
 
   try {
     // 1. Fetch in-person events
-    let eventQuery = supabase
-      .from('events')
-      .select('id, name, city, country, start_datetime_utc, end_datetime_utc, in_person, prize_pool, url, source')
-      .eq('in_person', true)
-      .order('start_datetime_utc', { ascending: true });
+    const eventParams = [];
+    const eventWhere = ['in_person = TRUE'];
 
-    if (normalizedDateRangeStart) eventQuery = eventQuery.gte('start_datetime_utc', normalizedDateRangeStart);
-    if (normalizedDateRangeEnd)   eventQuery = eventQuery.lte('start_datetime_utc', normalizedDateRangeEnd);
+    if (normalizedDateRangeStart) {
+      eventParams.push(normalizedDateRangeStart);
+      eventWhere.push(`start_datetime_utc >= $${eventParams.length}`);
+    }
+    if (normalizedDateRangeEnd) {
+      eventParams.push(normalizedDateRangeEnd);
+      eventWhere.push(`start_datetime_utc <= $${eventParams.length}`);
+    }
 
-    const { data: events, error: eventErr } = await eventQuery;
-    if (eventErr) return res.status(500).json({ error: eventErr.message });
+    const eventSql = `
+      SELECT id, name, city, country, start_datetime_utc, end_datetime_utc, in_person, prize_pool, url, source
+      FROM events
+      WHERE ${eventWhere.join(' AND ')}
+      ORDER BY start_datetime_utc ASC
+    `;
+    const { rows: events } = await db.query(eventSql, eventParams);
 
     // 2. Fetch all routes from provided origin airports
-    const { data: routes, error: routeErr } = await supabase
-      .from('routes')
-      .select('origin_airport, destination_airport, origin_city, destination_city, avg_outbound_price, avg_return_price, avg_outbound_duration_minutes, avg_return_duration_minutes')
-      .in('origin_airport', normalizedOriginAirports);
-
-    if (routeErr) return res.status(500).json({ error: routeErr.message });
+    const routeSql = `
+      SELECT
+        origin_airport,
+        destination_airport,
+        origin_city,
+        destination_city,
+        avg_outbound_price,
+        avg_return_price,
+        avg_outbound_duration_minutes,
+        avg_return_duration_minutes
+      FROM routes
+      WHERE origin_airport = ANY($1::text[])
+    `;
+    const { rows: routes } = await db.query(routeSql, [normalizedOriginAirports]);
 
     // 3. Fetch lodging rates to avoid stale hardcoded assumptions.
-    const { data: lodgingRows, error: lodgingErr } = await supabase
-      .from('lodging')
-      .select('city, nightly_rate');
-
-    if (lodgingErr) return res.status(500).json({ error: lodgingErr.message });
+    const { rows: lodgingRows } = await db.query('SELECT city, nightly_rate FROM lodging', []);
 
     const nightlyRateByCity = buildLodgingLookup(lodgingRows ?? []);
 

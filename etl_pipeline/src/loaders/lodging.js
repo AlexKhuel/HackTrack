@@ -182,9 +182,9 @@ async function main() {
     return;
   }
 
-  const dbUrl = args.dbUrl || process.env.SUPABASE_DB_URL || process.env.DATABASE_URL;
+  const dbUrl = args.dbUrl || process.env.SUPABASE_DB_URL;
   if (!dbUrl) {
-    throw new Error('Missing DB URL. Set SUPABASE_DB_URL or DATABASE_URL, or pass --db-url.');
+    throw new Error('Missing DB URL. Set SUPABASE_DB_URL, or pass --db-url.');
   }
 
   const client = new Client({ connectionString: dbUrl });
