@@ -87,23 +87,50 @@ def travel_time_score(feasible_events):
 #     return feasible
 
 
-def scored(max_cost, max_time, friend_cities=[]):
+def scored(max_cost, max_time, origin_airports = None, friend_cities=None):
+    if origin_airports is None:
+        origin_airports = []
+    if friend_cities is None:
+        friend_cities = []
     max_time = max_time * 60 #Convert hours to minutes
     events = load_events()
     routes = load_routes()
 
-    routes = (#In case of duplicates routes per city
-        routes
-        .groupby("destination_city", as_index=False)
-        .agg({
-            "avg_outbound_price": "mean",
-            "avg_return_price": "mean",
-            "avg_outbound_duration_minutes": "mean",
-            "avg_return_duration_minutes": "mean"
-        })
-    )
+    if origin_airports:
+        routes = routes[routes["origin_airport"].isin(origin_airports)]
+    # routes = (#In case of duplicates routes per city
+    #     routes
+    #     .groupby("destination_city", as_index=False)
+    #     .agg({
+    #         "avg_outbound_price": "mean",
+    #         "avg_return_price": "mean",
+    #         "avg_outbound_duration_minutes": "mean",
+    #         "avg_return_duration_minutes": "mean"
+    #     })
+    # )
     #lodging = load_lodging()
 
+    routes["total_flight_cost"] = (
+        routes["avg_outbound_price"] +
+        routes["avg_return_price"]
+    )
+
+    routes["total_flight_time"] = (
+        routes["avg_outbound_duration_minutes"] +
+        routes["avg_return_duration_minutes"]
+    )
+
+    # Keep cheapest route per destination city
+    routes = (
+        routes
+        .sort_values("total_flight_cost")
+        .groupby("destination_city", as_index=False)
+        .first()
+    )
+    #In case no routes are found for the selected airports, return empty dataframe
+    if routes.empty:
+        print("No routes found for selected airports.")
+        return pd.DataFrame()
     # Merge events + routes (match by city)
     df = events.merge(
         routes,
@@ -173,9 +200,9 @@ def scored(max_cost, max_time, friend_cities=[]):
 
     feasible_events["total_cost"] = feasible_events["total_cost"].replace(0, 1e-6)  # avoid divide-by-zero
     feasible_events["cost_ratio"] = (
-    feasible_events["prize_pool"] /
-    feasible_events["total_cost"].replace(0, 1e-6)
-)
+        feasible_events["prize_pool"] /
+        feasible_events["total_cost"].replace(0, 1e-6)
+    )
     
     max_ratio = feasible_events["cost_ratio"].max()
     min_ratio = feasible_events["cost_ratio"].min()
