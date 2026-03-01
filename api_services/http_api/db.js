@@ -64,6 +64,51 @@ async function ensureAppSchema() {
         CONSTRAINT user_max_time_check CHECK (max_time >= 0)
       );
     `);
+
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS app_user_opennote_connections (
+        app_user_id BIGINT PRIMARY KEY REFERENCES app_users(id) ON DELETE CASCADE,
+        opennote_account_id TEXT NOT NULL,
+        opennote_account_email TEXT NULL,
+        opennote_account_name TEXT NULL,
+        access_token_encrypted TEXT NOT NULL,
+        refresh_token_encrypted TEXT NULL,
+        token_expires_at TIMESTAMPTZ NULL,
+        scope TEXT NULL,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      );
+    `);
+
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS app_user_opennote_oauth_states (
+        state_token TEXT PRIMARY KEY,
+        app_user_id BIGINT NOT NULL REFERENCES app_users(id) ON DELETE CASCADE,
+        code_verifier TEXT NOT NULL,
+        return_to TEXT NULL,
+        expires_at TIMESTAMPTZ NOT NULL,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      );
+    `);
+
+    await pool.query(`
+      CREATE INDEX IF NOT EXISTS app_user_opennote_oauth_states_expires_idx
+      ON app_user_opennote_oauth_states(expires_at);
+    `);
+
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS app_user_opennote_exports (
+        app_user_id BIGINT NOT NULL REFERENCES app_users(id) ON DELETE CASCADE,
+        event_id TEXT NOT NULL,
+        opennote_journal_id TEXT NOT NULL,
+        opennote_journal_url TEXT NULL,
+        last_payload_hash TEXT NOT NULL,
+        last_exported_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        PRIMARY KEY (app_user_id, event_id)
+      );
+    `);
   })();
 
   return schemaBootstrapPromise;
