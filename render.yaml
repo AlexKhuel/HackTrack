@@ -17,7 +17,6 @@ services:
   - type: web
     name: irvine-hacks-web
     runtime: static
-    plan: free
     buildCommand: npm ci --prefix web_client && npm run --prefix web_client build
     staticPublishPath: web_client/dist
     routes:
