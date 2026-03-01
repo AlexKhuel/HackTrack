@@ -200,87 +200,13 @@ export default function ResultsList({ formData }) {
     const [minPrizePool, setMinPrizePool] = useState("");
     const [showFilters, setShowFilters] = useState(false);
 
-    const scored = useMemo(() => {
-        if (!hackathons.length) return [];
-
-        const prizes = hackathons
-            .map((h) => Number(h.prize_pool))
-            .filter((value) => Number.isFinite(value) && value > 0);
-        const travelPrices = hackathons
-            .map((h) => {
-                const totalCost = Number(h.estimated_cost);
-                return Number.isFinite(totalCost) && totalCost >= 0
-                    ? totalCost
-                    : Number.NaN;
-            })
-            .filter(Number.isFinite);
-        const travels = hackathons
-            .map((h) => Number(h.travel_time_hours))
-            .filter(Number.isFinite);
-
-        const prizeMin = prizes.length ? Math.min(...prizes) : 0;
-        const prizeMax = prizes.length ? Math.max(...prizes) : 0;
-        const travelPriceMin = travelPrices.length ? Math.min(...travelPrices) : 0;
-        const travelPriceMax = travelPrices.length ? Math.max(...travelPrices) : 0;
-        const travelMin = travels.length ? Math.min(...travels) : 0;
-        const travelMax = travels.length ? Math.max(...travels) : 0;
-
-        return hackathons.map((h) => {
-            const prizeValue = Number(h.prize_pool);
-            const hasPrizePool = Number.isFinite(prizeValue) && prizeValue > 0;
-            const normalizedPrize = hasPrizePool ? prizeValue : 0;
-            const totalCostValue = Number(h.estimated_cost);
-            const travelPriceValue =
-                Number.isFinite(totalCostValue) && totalCostValue >= 0
-                    ? totalCostValue
-                    : null;
-
-            const prize_score = hasPrizePool
-                ? norm(normalizedPrize, prizeMin, prizeMax)
-                : 0;
-            const travel_price_score = inverseNorm(
-                travelPriceValue,
-                travelPriceMin,
-                travelPriceMax,
-            );
-            const travel_time_score = inverseNorm(
-                h.travel_time_hours,
-                travelMin,
-                travelMax,
-            );
-            const cityText = (h.city ?? "").toString().toLowerCase();
-            const friend_bonus_score = friendsLower.some((c) =>
-                cityText.includes(c),
-            )
-                ? 1
-                : 0;
-
-            const composite =
-                0.35 * prize_score +
-                0.25 * travel_price_score +
-                0.25 * travel_time_score +
-                0.15 * friend_bonus_score;
-
-            return {
-                ...h,
-                scores: {
-                    composite,
-                    prize_score,
-                    travel_price_score,
-                    travel_time_score,
-                    friend_bonus_score,
-                },
-            };
-        });
-    }, [hackathons, friendsLower]);
-
     const filteredAndSorted = useMemo(() => {
         const maxHText = (maxOneWayHoursFilter ?? "").toString().trim();
         const minPText = (minPrizePool ?? "").toString().trim();
         const maxH = maxHText === "" ? null : Number(maxHText);
         const minP = minPText === "" ? null : Number(minPText);
 
-        return scored
+        const filtered = hackathons
             .filter((h) => {
                 if (!Number.isFinite(maxH)) return true;
                 const travelHours = getOneWayTravelHours(h);
@@ -293,9 +219,83 @@ export default function ResultsList({ formData }) {
                 if (!Number.isFinite(prizePool) || prizePool <= 0)
                     return minP <= 0;
                 return prizePool >= minP;
+            });
+
+        if (!filtered.length) return [];
+
+        // Make score components relative to the currently filtered candidate set.
+        const prizes = filtered
+            .map((h) => Number(h.prize_pool))
+            .filter((value) => Number.isFinite(value) && value > 0);
+        const travelPrices = filtered
+            .map((h) => {
+                const totalCost = Number(h.estimated_cost);
+                return Number.isFinite(totalCost) && totalCost >= 0
+                    ? totalCost
+                    : Number.NaN;
+            })
+            .filter(Number.isFinite);
+        const travels = filtered
+            .map((h) => Number(h.travel_time_hours))
+            .filter(Number.isFinite);
+
+        const prizeMin = prizes.length ? Math.min(...prizes) : 0;
+        const prizeMax = prizes.length ? Math.max(...prizes) : 0;
+        const travelPriceMin = travelPrices.length ? Math.min(...travelPrices) : 0;
+        const travelPriceMax = travelPrices.length ? Math.max(...travelPrices) : 0;
+        const travelMin = travels.length ? Math.min(...travels) : 0;
+        const travelMax = travels.length ? Math.max(...travels) : 0;
+
+        return filtered
+            .map((h) => {
+                const prizeValue = Number(h.prize_pool);
+                const hasPrizePool = Number.isFinite(prizeValue) && prizeValue > 0;
+                const normalizedPrize = hasPrizePool ? prizeValue : 0;
+                const totalCostValue = Number(h.estimated_cost);
+                const travelPriceValue =
+                    Number.isFinite(totalCostValue) && totalCostValue >= 0
+                        ? totalCostValue
+                        : null;
+
+                const prize_score = hasPrizePool
+                    ? norm(normalizedPrize, prizeMin, prizeMax)
+                    : 0;
+                const travel_price_score = inverseNorm(
+                    travelPriceValue,
+                    travelPriceMin,
+                    travelPriceMax,
+                );
+                const travel_time_score = inverseNorm(
+                    h.travel_time_hours,
+                    travelMin,
+                    travelMax,
+                );
+                const cityText = (h.city ?? "").toString().toLowerCase();
+                const friend_bonus_score = friendsLower.some((c) =>
+                    cityText.includes(c),
+                )
+                    ? 1
+                    : 0;
+
+                const composite =
+                    0.35 * prize_score +
+                    0.25 * travel_price_score +
+                    0.25 * travel_time_score +
+                    0.15 * friend_bonus_score;
+
+                return {
+                    ...h,
+                    scores: {
+                        composite,
+                        prize_score,
+                        travel_price_score,
+                        travel_time_score,
+                        friend_bonus_score,
+                    },
+                };
             })
             .sort((a, b) => b.scores.composite - a.scores.composite);
-    }, [scored, maxOneWayHoursFilter, minPrizePool]);
+    }, [hackathons, friendsLower, maxOneWayHoursFilter, minPrizePool]);
 
     useEffect(() => {
         const abortController = new AbortController();
