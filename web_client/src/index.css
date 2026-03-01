@@ -11,7 +11,7 @@
   --slate: #0D1B2A;
   --ink: #060E18;
   --cream: #F5EDD6;
-  --muted: #F5EDD6;
+  --muted: #8fa3b4;
   --card-bg: rgba(0,20,35,0.55);
   --border: rgba(0,200,180,0.18);
   --safe-top: env(safe-area-inset-top, 0px);
@@ -794,6 +794,22 @@ section {
   font-size: 0.7rem;
   line-height: 1.35;
   font-family: 'Space Mono', monospace;
+}
+
+/* RESULT CARD ENTRANCE */
+@keyframes cardEnter {
+  from {
+    opacity: 0;
+    transform: translateY(24px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+.card-enter {
+  opacity: 0;
+  animation: cardEnter 0.45s cubic-bezier(0.22, 1, 0.36, 1) forwards;
 }
 
 /* SKELETON CARDS */

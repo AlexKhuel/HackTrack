@@ -507,7 +507,11 @@ export default function ResultsList({ formData }) {
                             hotelShareSavings,
                         );
                         return (
-                            <article key={h.id} className="demo-card">
+                            <article
+                                key={h.id}
+                                className="demo-card card-enter"
+                                style={{ animationDelay: `${idx * 0.1}s` }}
+                            >
                                 <div className="demo-card-header">
                                     <div>
                                         <div className="event-name">
