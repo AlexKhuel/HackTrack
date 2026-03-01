@@ -173,3 +173,17 @@ Quick verification:
 npm --prefix api_services test
 npm --prefix web_client run build
 ```
+
+## Windows Proxy Troubleshooting
+
+If `npm --prefix web_client run dev` logs a Vite proxy error like `read ECONNRESET` for `/api/...`, the frontend is reachable but the API target is not.
+
+1. Confirm API health:
+   - `curl http://127.0.0.1:3000/health`
+2. If port `3000` is already occupied by another process, either stop that process or run the API on another port:
+   - PowerShell: `$env:PORT=3001; npm --prefix api_services run dev`
+3. Point the web client proxy at the matching API port:
+   - PowerShell: `$env:VITE_API_PROXY_TARGET='http://127.0.0.1:3001'; npm --prefix web_client run dev`
+4. If needed, clear and reinstall dependencies:
+   - `npm --prefix api_services ci`
+   - `npm --prefix web_client ci`

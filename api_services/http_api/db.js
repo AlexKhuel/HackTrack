@@ -15,6 +15,11 @@ const pool = new Pool({
   ssl: hasLocalHost ? undefined : { rejectUnauthorized: false },
 });
 
+pool.on('error', (err) => {
+  // Avoid silent process-level crashes on idle client socket failures.
+  console.error('[db] Unexpected PostgreSQL idle client error:', err);
+});
+
 module.exports = {
   query: (text, params) => pool.query(text, params),
   pool,
