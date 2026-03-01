@@ -37,8 +37,10 @@ export default function HomePage({ onGetStarted }) {
                     Built for Hackers, by Hackers
                 </div>
                 <h1>
-                    <span className="line1">Find hackathons</span>
-                    <span className="line2">built around your life.</span>
+                    <span className="line1">Find</span>
+                    <span className="line2">hackathons</span>
+                    <span className="line3">built around</span>
+                    <span className="line4">your life.</span>
                 </h1>
                 <p className="hero-sub">
                     Tell us your schedule, budget, and where your friends are.

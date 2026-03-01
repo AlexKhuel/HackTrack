@@ -11,7 +11,7 @@
   --slate: #0D1B2A;
   --ink: #060E18;
   --cream: #F5EDD6;
-  --muted: rgba(245,237,214,0.55);
+  --muted: #F5EDD6;
   --card-bg: rgba(0,20,35,0.55);
   --border: rgba(0,200,180,0.18);
   --safe-top: env(safe-area-inset-top, 0px);
@@ -24,7 +24,7 @@
 
 html {
   scroll-behavior: smooth;
-  background: #000a12;
+  background: #021327;
   -webkit-text-size-adjust: 100%;
   text-size-adjust: 100%;
   width: 100%;
@@ -72,9 +72,9 @@ body::-webkit-scrollbar,
   overflow: hidden;
   pointer-events: none;
   background:
-    radial-gradient(120% 100% at 12% 4%, rgba(26, 63, 94, 0.48) 0%, rgba(7, 22, 39, 0) 56%),
-    radial-gradient(120% 92% at 84% 14%, rgba(41, 86, 121, 0.36) 0%, rgba(9, 22, 35, 0) 60%),
-    linear-gradient(160deg, #050f1b 0%, #091e33 46%, #0a1422 100%);
+    radial-gradient(105% 88% at 11% 6%, rgba(7, 46, 82, 0.44) 0%, rgba(7, 46, 82, 0) 56%),
+    radial-gradient(98% 80% at 82% 10%, rgba(15, 79, 126, 0.32) 0%, rgba(15, 79, 126, 0) 58%),
+    linear-gradient(180deg, #00112a 0%, #032a4f 52%, #0d5786 100%);
   background-size: 115% 115%, 120% 120%, 100% 100%;
   animation: bgShift 36s ease-in-out infinite alternate;
   transform: translate3d(0, 0, 0);
@@ -179,8 +179,8 @@ body::-webkit-scrollbar,
   position: absolute;
   inset: 0;
   background:
-    radial-gradient(120% 100% at 50% 108%, rgba(4, 10, 18, 0) 34%, rgba(3, 7, 13, 0.46) 72%, rgba(2, 5, 11, 0.72) 100%),
-    linear-gradient(180deg, rgba(3, 11, 19, 0.54) 0%, rgba(3, 9, 16, 0.46) 44%, rgba(2, 6, 12, 0.68) 100%);
+    radial-gradient(120% 100% at 50% 108%, rgba(4, 10, 18, 0) 36%, rgba(3, 7, 13, 0.34) 72%, rgba(2, 5, 11, 0.5) 100%),
+    linear-gradient(180deg, rgba(3, 11, 19, 0.32) 0%, rgba(3, 9, 16, 0.24) 44%, rgba(2, 6, 12, 0.42) 100%);
   animation: vignetteShift 30s ease-in-out infinite alternate;
 }
 
@@ -385,16 +385,24 @@ nav ul a:hover { color: var(--teal); }
 }
 
 #hero h1 {
-  font-size: clamp(2.4rem, 5.5vw, 4.8rem);
+  font-size: clamp(2.44rem, 5.55vw, 4.78rem);
   font-weight: 800;
-  line-height: 1.0;
-  letter-spacing: -0.03em;
+  line-height: 0.95;
+  letter-spacing: -0.02em;
   margin-bottom: 1.8rem;
   max-width: 100%;
   overflow-wrap: anywhere;
 }
 #hero h1 .line1 { display: block; color: var(--cream); }
-#hero h1 .line2 { display: block; color: var(--gold); }
+#hero h1 .line2 { display: block; color: var(--cream); }
+#hero h1 .line3 { display: block; color: var(--gold); }
+#hero h1 .line4 { display: block; color: var(--gold); }
+#hero h1 .line1,
+#hero h1 .line2,
+#hero h1 .line3,
+#hero h1 .line4 {
+  white-space: nowrap;
+}
 
 .hero-sub {
   max-width: 560px;
@@ -489,7 +497,7 @@ nav ul a:hover { color: var(--teal); }
 }
 .stat-label {
   font-size: 0.7rem;
-  color: rgba(245,237,214,0.35);
+  color: var(--cream);
   font-family: 'Space Mono', monospace;
   letter-spacing: 0.08em;
   text-transform: uppercase;
@@ -849,7 +857,7 @@ section {
 .form-note {
   font-family: 'Space Mono', monospace;
   font-size: 0.65rem;
-  color: rgba(245,237,214,0.3);
+  color: var(--cream);
   letter-spacing: 0.1em;
 }
 
@@ -869,7 +877,7 @@ footer {
   background: rgba(0,12,24,0.75);
   backdrop-filter: blur(8px);
   font-size: 0.8rem;
-  color: rgba(245,237,214,0.3);
+  color: var(--cream);
   font-family: 'Space Mono', monospace;
 }
 footer .logo { font-size: 1rem; }
@@ -911,7 +919,7 @@ footer .logo { font-size: 1rem; }
   font-size: 0.6rem;
   letter-spacing: 0.3em;
   text-transform: uppercase;
-  color: rgba(245,237,214,0.4);
+  color: var(--cream);
 }
 .scroll-down-line {
   width: 1px;
@@ -934,7 +942,7 @@ footer .logo { font-size: 1rem; }
   }
 
   #hero h1 {
-    font-size: clamp(1.58rem, 9.2vw, 2.28rem);
+    font-size: clamp(1.25rem, 6.65vw, 1.74rem);
     line-height: 0.98;
     margin-bottom: 1.3rem;
     max-width: 100%;

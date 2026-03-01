@@ -435,7 +435,7 @@ export default function InputForm({ initialValues, onSubmit }) {
                 </label>
 
                 <div className="flex items-center justify-between gap-6">
-                    <div className="text-xs font-semibold uppercase tracking-[0.25em] text-[rgba(245,237,214,0.4)] font-['Space_Mono',monospace]">
+                    <div className="text-xs font-semibold uppercase tracking-[0.25em] text-[var(--cream)] font-['Space_Mono',monospace]">
                         Shareable via URL query params
                     </div>
                     <button type="submit" className="btn-primary">

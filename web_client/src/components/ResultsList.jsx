@@ -4,7 +4,7 @@ import { fetchFeasibleHackathons } from "../utils/api";
 const FILTER_INPUT =
     "w-48 bg-[rgba(245,237,214,0.07)] border border-[var(--border)] rounded-[6px] px-3 py-2 text-[var(--cream)] outline-none focus:border-[var(--teal)] font-['Syne',sans-serif]";
 const FILTER_LABEL =
-    "text-xs font-semibold uppercase tracking-[0.25em] text-[var(--muted)] font-['Space_Mono',monospace]";
+    "text-xs font-semibold uppercase tracking-[0.25em] text-[var(--cream)] font-['Space_Mono',monospace]";
 
 function clamp01(x) {
     if (!Number.isFinite(x)) return 0;
@@ -354,10 +354,10 @@ export default function ResultsList({ formData }) {
                     onClick={() => setShowFilters((value) => !value)}
                     className="mx-auto flex items-center justify-center gap-4 text-center"
                 >
-                    <span className="text-xs font-semibold uppercase tracking-[0.25em] text-[rgba(245,237,214,0.4)] font-['Space_Mono',monospace]">
+                    <span className="text-xs font-semibold uppercase tracking-[0.25em] text-[var(--cream)] font-['Space_Mono',monospace]">
                         Filters
                     </span>
-                    <span className="text-xs font-semibold uppercase tracking-[0.25em] text-[rgba(245,237,214,0.6)] font-['Space_Mono',monospace]">
+                    <span className="text-xs font-semibold uppercase tracking-[0.25em] text-[var(--cream)] font-['Space_Mono',monospace]">
                         {showFilters ? "Hide" : "Show"}
                     </span>
                 </button>
@@ -409,7 +409,7 @@ export default function ResultsList({ formData }) {
                         <div className="text-4xl font-black tracking-[-0.02em] text-[#e4032e]">
                             SOMETHING WENT WRONG.
                         </div>
-                        <div className="mt-3 text-xs font-semibold uppercase tracking-[0.25em] text-white/40">
+                        <div className="mt-3 text-xs font-semibold uppercase tracking-[0.25em] text-[var(--cream)]">
                             {errorText || "unknown_error"}
                         </div>
                     </div>
@@ -562,7 +562,7 @@ export default function ResultsList({ formData }) {
                                 </div>
 
                                 <div className="mt-3 flex items-center justify-between text-xs">
-                                    <div className="text-[var(--muted)] font-['Space_Mono',monospace]">
+                                    <div className="text-[var(--cream)] font-['Space_Mono',monospace]">
                                         Match factors: prize, travel price,
                                         travel, friends
                                     </div>
