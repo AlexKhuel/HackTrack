@@ -237,7 +237,7 @@ export default function HomePage({ onGetStarted }) {
                         <div className="score-bars">
                             <div className="score-row">
                                 <div className="score-row-meta">
-                                    <span>prize_score</span>
+                                    <span>Prize Score</span>
                                     <span>0.88</span>
                                 </div>
                                 <div className="bar-track">
@@ -246,7 +246,7 @@ export default function HomePage({ onGetStarted }) {
                             </div>
                             <div className="score-row">
                                 <div className="score-row-meta">
-                                    <span>prize_to_cost</span>
+                                    <span>Travel Price</span>
                                     <span>0.72</span>
                                 </div>
                                 <div className="bar-track">
@@ -255,7 +255,7 @@ export default function HomePage({ onGetStarted }) {
                             </div>
                             <div className="score-row">
                                 <div className="score-row-meta">
-                                    <span>travel_time</span>
+                                    <span>Travel Time</span>
                                     <span>0.65</span>
                                 </div>
                                 <div className="bar-track">
@@ -264,7 +264,7 @@ export default function HomePage({ onGetStarted }) {
                             </div>
                             <div className="score-row">
                                 <div className="score-row-meta">
-                                    <span>friend_bonus</span>
+                                    <span>Friend Bonus</span>
                                     <span>1.00 ★</span>
                                 </div>
                                 <div className="bar-track">
