@@ -1,4 +1,6 @@
 import { useEffect, useMemo, useState } from "react"
+import { Capacitor } from "@capacitor/core"
+import { StatusBar, Style } from "@capacitor/status-bar"
 import HomePage from "./components/HomePage"
 import NavBar from "./components/NavBar"
 import InputForm from "./components/InputForm"
@@ -106,6 +108,22 @@ export default function App() {
   const initial = useMemo(() => parseFormFromSearch(window.location.search), [])
   const [view, setView] = useState(initial.view)
   const [form, setForm] = useState({ ...DEFAULT_FORM, ...initial.form })
+
+  useEffect(() => {
+    if (Capacitor.getPlatform() !== "ios") return
+
+    const configureStatusBar = async () => {
+      try {
+        await StatusBar.show()
+        await StatusBar.setStyle({ style: Style.Dark })
+        await StatusBar.setOverlaysWebView({ overlay: true })
+      } catch {
+        // Ignore if status bar APIs are unavailable in this environment.
+      }
+    }
+
+    void configureStatusBar()
+  }, [])
 
   useEffect(() => {
     const onPopState = () => {

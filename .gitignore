@@ -1,37 +1,41 @@
-# Virtual environments
+# OS/editor artifacts
+.DS_Store
+.idea/
+.vscode/*
+!.vscode/extensions.json
+
+# Environment/secrets
+.env
+.env.*
+*.env
+*.env.*
+*.local
+!.env.example
+!**/.env.example
+
+# Python artifacts
 .venv/
 venv/
-
-# Node artifacts
-node_modules/
-Supabase-Pipeline/node_modules/
-
-# Python cache/artifacts
 __pycache__/
 *.py[cod]
 *.pyo
 *.pyd
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
 
-# Environment files
-.env
-.env.*
-!.env.example
+# Node artifacts
+node_modules/
+dist/
+dist-ssr/
+coverage/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
 
-# Local outputs
-*.json
-*.csv
-!data_pipeline/package.json
-!data_pipeline/package-lock.json
-!data_pipeline/data/routes_weighted_post2020.json
-!data_pipeline/data/lodging_formatted.json
-!data_pipeline/data/airport_city_map.json
-!data_pipeline/data/us_city_hotel_average_prices.csv
-!backend/package.json
-!backend/package-lock.json
-
-# macOS
-.DS_Store
-
-# Node backend
-backend/node_modules/
-backend/.env
+# iOS/Xcode generated artifacts
+DerivedData/
+xcuserdata/
+.build/
+*.xcuserstate

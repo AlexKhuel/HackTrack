@@ -1,0 +1,11 @@
+{
+  "appId": "com.irvinehacks.app",
+  "appName": "Irvine Hacks",
+  "webDir": "dist",
+  "plugins": {
+    "StatusBar": {
+      "overlaysWebView": true,
+      "style": "DARK"
+    }
+  }
+}
