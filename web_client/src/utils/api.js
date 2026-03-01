@@ -1,4 +1,10 @@
 const DEFAULT_BUDGET = 1_000_000
+const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL ?? "").toString().trim().replace(/\/+$/, "")
+
+function buildApiUrl(path) {
+  if (!API_BASE_URL) return path
+  return `${API_BASE_URL}${path}`
+}
 
 function pad2(value) {
   return String(value).padStart(2, "0")
@@ -288,7 +294,7 @@ async function fetchFeasibleHackathons(formData, options = {}) {
     params.append("friend_cities", city)
   }
 
-  const response = await fetch(`/api/hackathons/feasible?${params.toString()}`, {
+  const response = await fetch(buildApiUrl(`/api/hackathons/feasible?${params.toString()}`), {
     method: "GET",
     signal: options.signal,
   })
