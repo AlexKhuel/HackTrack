@@ -796,6 +796,33 @@ section {
   font-family: 'Space Mono', monospace;
 }
 
+/* SKELETON CARDS */
+@keyframes shimmer {
+  0%   { background-position: -200% 0; }
+  100% { background-position: 200% 0; }
+}
+.skel {
+  border-radius: 6px;
+  background: linear-gradient(
+    90deg,
+    rgba(255,255,255,0.05) 25%,
+    rgba(255,255,255,0.12) 50%,
+    rgba(255,255,255,0.05) 75%
+  );
+  background-size: 200% 100%;
+  animation: shimmer 1.6s ease-in-out infinite;
+}
+.skel-name       { height: 1rem;    width: 60%;     margin-bottom: 6px; }
+.skel-city       { height: 0.65rem; width: 40%; }
+.skel-badge      { height: 2.2rem;  width: 3.5rem;  border-radius: 6px; }
+.skel-label      { height: 0.65rem; width: 5rem; }
+.skel-bar        { height: 100%;    border-radius: 99px; }
+.skel-meta-label { height: 0.6rem;  width: 55%;     margin-bottom: 5px; }
+.skel-meta-value { height: 0.85rem; width: 75%;     margin-bottom: 4px; }
+.skel-meta-sub   { height: 0.6rem;  width: 85%; }
+.skel-footer-text { height: 0.65rem; width: 55%; }
+.skel-btn        { height: 1.8rem;  width: 5.5rem;  border-radius: 6px; }
+
 /* CTA SECTION */
 #cta {
   padding:

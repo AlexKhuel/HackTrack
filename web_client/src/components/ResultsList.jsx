@@ -6,6 +6,46 @@ const FILTER_INPUT =
 const FILTER_LABEL =
     "text-xs font-semibold uppercase tracking-[0.25em] text-[var(--cream)] font-['Space_Mono',monospace]";
 
+function SkeletonCard() {
+    return (
+        <article className="demo-card skeleton-card">
+            <div className="demo-card-header">
+                <div style={{ flex: 1 }}>
+                    <div className="skel skel-name" />
+                    <div className="skel skel-city" />
+                </div>
+                <div className="skel skel-badge" />
+            </div>
+            <div className="score-bars">
+                {[80, 65, 72, 55].map((w, i) => (
+                    <div className="score-row" key={i}>
+                        <div className="score-row-meta">
+                            <div className="skel skel-label" />
+                            <div className="skel skel-label" style={{ width: "2.5rem" }} />
+                        </div>
+                        <div className="bar-track">
+                            <div className="skel skel-bar" style={{ width: `${w}%` }} />
+                        </div>
+                    </div>
+                ))}
+            </div>
+            <div className="demo-meta">
+                {[0, 1, 2, 3].map((i) => (
+                    <div className="meta-item" key={i}>
+                        <div className="skel skel-meta-label" />
+                        <div className="skel skel-meta-value" />
+                        <div className="skel skel-meta-sub" />
+                    </div>
+                ))}
+            </div>
+            <div className="mt-3 flex items-center justify-between">
+                <div className="skel skel-footer-text" />
+                <div className="skel skel-btn" />
+            </div>
+        </article>
+    );
+}
+
 function clamp01(x) {
     if (!Number.isFinite(x)) return 0;
     return Math.max(0, Math.min(1, x));
@@ -397,10 +437,10 @@ export default function ResultsList({ formData }) {
             </div>
 
             {status === "loading" ? (
-                <div className="grid min-h-[50vh] place-items-center">
-                    <div className="text-4xl font-black tracking-[-0.02em]">
-                        SEARCHING...
-                    </div>
+                <div className="score-demo-wrap">
+                    <SkeletonCard />
+                    <SkeletonCard />
+                    <SkeletonCard />
                 </div>
             ) : null}
 
