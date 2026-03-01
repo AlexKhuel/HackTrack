@@ -21,7 +21,11 @@ const MAX_CITY_GEO_CACHE_ENTRIES = 5000;
 const GEO_TIMEOUT_MS = 3500;
 const GEO_RESULT_COUNT = 10;
 const SCRAPE_TIMEOUT_MS = 6500;
+const SCRAPE_GEO_TIMEOUT_MS = 3500;
+const SCRAPE_GEO_RESULT_COUNT = 1;
 const MAX_SCRAPE_HTML_LENGTH = 1_000_000;
+const VENUE_GEO_CACHE = new Map();
+const MAX_VENUE_GEO_CACHE_ENTRIES = 1000;
 const DRIVE_AIRPORT_CLUSTERS = [
   new Set(['LAX', 'SNA', 'LGB', 'ONT', 'BUR']),
 ];
@@ -37,6 +41,60 @@ const US_COUNTRY_TOKENS = new Set([
   'u s a',
   'america',
 ]);
+const US_STATE_NAME_TO_CODE = Object.freeze({
+  alabama: 'AL',
+  alaska: 'AK',
+  arizona: 'AZ',
+  arkansas: 'AR',
+  california: 'CA',
+  colorado: 'CO',
+  connecticut: 'CT',
+  delaware: 'DE',
+  florida: 'FL',
+  georgia: 'GA',
+  hawaii: 'HI',
+  idaho: 'ID',
+  illinois: 'IL',
+  indiana: 'IN',
+  iowa: 'IA',
+  kansas: 'KS',
+  kentucky: 'KY',
+  louisiana: 'LA',
+  maine: 'ME',
+  maryland: 'MD',
+  massachusetts: 'MA',
+  michigan: 'MI',
+  minnesota: 'MN',
+  mississippi: 'MS',
+  missouri: 'MO',
+  montana: 'MT',
+  nebraska: 'NE',
+  nevada: 'NV',
+  'new hampshire': 'NH',
+  'new jersey': 'NJ',
+  'new mexico': 'NM',
+  'new york': 'NY',
+  'north carolina': 'NC',
+  'north dakota': 'ND',
+  ohio: 'OH',
+  oklahoma: 'OK',
+  oregon: 'OR',
+  pennsylvania: 'PA',
+  'rhode island': 'RI',
+  'south carolina': 'SC',
+  'south dakota': 'SD',
+  tennessee: 'TN',
+  texas: 'TX',
+  utah: 'UT',
+  vermont: 'VT',
+  virginia: 'VA',
+  washington: 'WA',
+  'west virginia': 'WV',
+  wisconsin: 'WI',
+  wyoming: 'WY',
+  'district of columbia': 'DC',
+});
+const US_STATE_CODES = new Set(Object.values(US_STATE_NAME_TO_CODE));
 
 function decodeHtmlEntities(value) {
   return String(value ?? '')
@@ -147,6 +205,61 @@ function pickString(...candidates) {
   return '';
 }
 
+function normalizeUsStateCode(value) {
+  const token = collapseWhitespace(value).toUpperCase();
+  if (!token) return '';
+  if (US_STATE_CODES.has(token)) return token;
+
+  const byName = US_STATE_NAME_TO_CODE[normalizeCityToken(token)];
+  if (byName) return byName;
+
+  const tail = token.match(/([A-Z]{2})$/);
+  if (tail && US_STATE_CODES.has(tail[1])) return tail[1];
+  return '';
+}
+
+function inferCountryFromState(state, country) {
+  const pickedCountry = pickString(country);
+  if (pickedCountry) return pickedCountry;
+  return normalizeUsStateCode(state) ? 'United States' : '';
+}
+
+function extractUniversitySchoolName(text) {
+  const source = collapseWhitespace(text);
+  if (!source) return '';
+  const match = source.match(
+    /\b(University of [A-Za-z0-9&'-]+(?:\s+[A-Za-z0-9&'-]+){0,8}(?:,\s*[A-Za-z0-9&'-]+)?)\b/i
+  );
+  if (!match) return '';
+  return collapseWhitespace(match[1]).replace(/\s*,\s*/g, ' ');
+}
+
+function scoreSchoolName(name) {
+  const text = collapseWhitespace(name);
+  if (!text) return Number.NEGATIVE_INFINITY;
+  let score = Math.min(4, Math.floor(text.length / 12));
+  if (/\b(university|college|institute|polytechnic|school)\b/i.test(text)) score += 6;
+  if (/\bhack[a-z0-9]*\b/i.test(text) && !/\b(university|college|institute|polytechnic|school)\b/i.test(text)) {
+    score -= 2;
+  }
+  return score;
+}
+
+function pickBestSchoolName(...candidates) {
+  let bestName = '';
+  let bestScore = Number.NEGATIVE_INFINITY;
+  for (const candidate of candidates) {
+    const text = collapseWhitespace(candidate);
+    if (!text) continue;
+    const score = scoreSchoolName(text);
+    if (score > bestScore) {
+      bestName = text;
+      bestScore = score;
+    }
+  }
+  return bestName;
+}
+
 function parseCountryToken(value) {
   if (typeof value === 'string') return collapseWhitespace(value);
   if (value != null && typeof value === 'object') {
@@ -219,8 +332,11 @@ function inferEventFromJsonLd(nodes) {
       school: '',
       city: '',
       state: '',
+      state_code: '',
       country: '',
       venue_name: '',
+      venue_latitude: null,
+      venue_longitude: null,
       start_datetime_utc: '',
       end_datetime_utc: '',
       url: '',
@@ -238,8 +354,11 @@ function inferEventFromJsonLd(nodes) {
     school: pickString(organizer.name),
     city: pickString(bestLocation.city),
     state: pickString(bestLocation.state),
-    country: pickString(bestLocation.country),
+    state_code: normalizeUsStateCode(bestLocation.state),
+    country: inferCountryFromState(bestLocation.state, bestLocation.country),
     venue_name: pickString(bestLocation.venue_name),
+    venue_latitude: null,
+    venue_longitude: null,
     start_datetime_utc: normalizeScrapedDate(eventNode.startDate),
     end_datetime_utc: normalizeScrapedDate(eventNode.endDate),
     url: pickString(eventNode.url),
@@ -288,8 +407,11 @@ function inferEventFromMeta(html) {
     school,
     city,
     state,
-    country,
+    state_code: normalizeUsStateCode(state),
+    country: inferCountryFromState(state, country),
     venue_name: '',
+    venue_latitude: null,
+    venue_longitude: null,
     start_datetime_utc: normalizeScrapedDate(startFromMeta || timeDateTimes[0]),
     end_datetime_utc: normalizeScrapedDate(endFromMeta || timeDateTimes[1]),
     url: extractMetaContent(html, (key) => key === 'og:url' || key === 'canonical'),
@@ -297,14 +419,166 @@ function inferEventFromMeta(html) {
   };
 }
 
+function extractHeroDetailsText(html) {
+  const match = String(html ?? '').match(/<div[^>]*heroDetails[^>]*>([\s\S]*?)<\/div>/i);
+  if (!match) return '';
+  return stripHtml(match[1]);
+}
+
+function inferLocationFromHeroDetails(heroDetailsText) {
+  const segments = collapseWhitespace(heroDetailsText)
+    .split('•')
+    .map((token) => collapseWhitespace(token))
+    .filter(Boolean);
+
+  const hasVenueAndLocation = segments.length >= 3;
+  const venueName = hasVenueAndLocation ? segments[1] : '';
+  const locationText = hasVenueAndLocation ? segments[2] : segments[1] ?? '';
+  const locationTokens = locationText
+    .split(',')
+    .map((token) => collapseWhitespace(token))
+    .filter(Boolean);
+  let city = '';
+  let state = '';
+  let country = '';
+  if (locationTokens.length >= 3) {
+    city = locationTokens[0];
+    state = locationTokens[1];
+    country = locationTokens.slice(2).join(', ');
+  } else if (locationTokens.length === 2) {
+    city = locationTokens[0];
+    state = locationTokens[1];
+  } else {
+    city = locationTokens[0] ?? '';
+  }
+  country = inferCountryFromState(state, country);
+
+  return {
+    venue_name: venueName,
+    city,
+    state,
+    state_code: normalizeUsStateCode(state),
+    country,
+  };
+}
+
+function inferEventFromHtmlHeuristics(html) {
+  const heroDetailsText = extractHeroDetailsText(html);
+  const heroLocation = inferLocationFromHeroDetails(heroDetailsText);
+  const ogDescription = extractMetaContent(html, (key) => key === 'og:description' || key === 'description');
+  const bodyText = stripHtml(html);
+  const school = pickBestSchoolName(
+    extractUniversitySchoolName(ogDescription),
+    extractUniversitySchoolName(bodyText)
+  );
+
+  return {
+    name: '',
+    school,
+    city: heroLocation.city,
+    state: heroLocation.state,
+    state_code: heroLocation.state_code,
+    country: heroLocation.country,
+    venue_name: heroLocation.venue_name,
+    venue_latitude: null,
+    venue_longitude: null,
+    start_datetime_utc: '',
+    end_datetime_utc: '',
+    url: '',
+    source: 'heuristic',
+  };
+}
+
+function cacheVenueGeo(cacheKey, result) {
+  if (VENUE_GEO_CACHE.size >= MAX_VENUE_GEO_CACHE_ENTRIES) {
+    const oldest = VENUE_GEO_CACHE.keys().next().value;
+    if (oldest) VENUE_GEO_CACHE.delete(oldest);
+  }
+  VENUE_GEO_CACHE.set(cacheKey, result);
+}
+
+function parseVenueGeoResponseItem(item) {
+  const row = toObjectLike(item);
+  if (!row) return null;
+  const latitude = Number(row.lat);
+  const longitude = Number(row.lon);
+  if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) return null;
+
+  const address = toObjectLike(row.address) ?? {};
+  const state = pickString(address.state);
+  const country = pickString(address.country);
+  const stateCode = pickString(
+    normalizeUsStateCode(address.state_code),
+    normalizeUsStateCode(address['ISO3166-2-lvl4']),
+    normalizeUsStateCode(state)
+  );
+
+  return {
+    venue_latitude: latitude,
+    venue_longitude: longitude,
+    state,
+    state_code: stateCode,
+    country,
+  };
+}
+
+async function geocodeVenueLocation({ venue_name, city, state, country }) {
+  const query = [venue_name, city, state, country]
+    .map((token) => collapseWhitespace(token))
+    .filter(Boolean)
+    .join(', ');
+  if (!query) return null;
+
+  const cacheKey = normalizeCityToken(query) || query.toLowerCase();
+  if (VENUE_GEO_CACHE.has(cacheKey)) return VENUE_GEO_CACHE.get(cacheKey);
+
+  const url = new URL('https://nominatim.openstreetmap.org/search');
+  url.searchParams.set('format', 'jsonv2');
+  url.searchParams.set('addressdetails', '1');
+  url.searchParams.set('limit', String(SCRAPE_GEO_RESULT_COUNT));
+  url.searchParams.set('q', query);
+
+  const abortController = new AbortController();
+  const timeoutHandle = setTimeout(() => abortController.abort(), SCRAPE_GEO_TIMEOUT_MS);
+  let parsedRows = null;
+  try {
+    const response = await fetch(url.toString(), {
+      method: 'GET',
+      signal: abortController.signal,
+      headers: {
+        Accept: 'application/json',
+        'User-Agent': 'HackTrackBot/1.0 (+https://github.com/AlexKhuel/Irvine-Hacks)',
+      },
+    });
+    if (response.ok) {
+      const payload = await response.json();
+      parsedRows = Array.isArray(payload) ? payload : null;
+    }
+  } catch {
+    parsedRows = null;
+  } finally {
+    clearTimeout(timeoutHandle);
+  }
+
+  const result = parseVenueGeoResponseItem(parsedRows?.[0]) ?? null;
+  cacheVenueGeo(cacheKey, result);
+  return result;
+}
+
 function mergeScrapedEventData(primary, fallback) {
   return {
     name: pickString(primary?.name, fallback?.name),
-    school: pickString(primary?.school, fallback?.school),
+    school: pickBestSchoolName(primary?.school, fallback?.school),
     city: pickString(primary?.city, fallback?.city),
     state: pickString(primary?.state, fallback?.state),
-    country: pickString(primary?.country, fallback?.country),
+    state_code: pickString(primary?.state_code, fallback?.state_code),
+    country: inferCountryFromState(
+      pickString(primary?.state, fallback?.state),
+      pickString(primary?.country, fallback?.country)
+    ),
     venue_name: pickString(primary?.venue_name, fallback?.venue_name),
+    venue_latitude: primary?.venue_latitude ?? fallback?.venue_latitude ?? null,
+    venue_longitude: primary?.venue_longitude ?? fallback?.venue_longitude ?? null,
     start_datetime_utc: pickString(primary?.start_datetime_utc, fallback?.start_datetime_utc),
     end_datetime_utc: pickString(primary?.end_datetime_utc, fallback?.end_datetime_utc),
     url: pickString(primary?.url, fallback?.url),
@@ -932,7 +1206,30 @@ router.get('/scrape-event', async (req, res) => {
   const jsonLdNodes = parseJsonLdNodes(pageHtml);
   const inferredFromJsonLd = inferEventFromJsonLd(jsonLdNodes);
   const inferredFromMeta = inferEventFromMeta(pageHtml);
-  const merged = mergeScrapedEventData(inferredFromJsonLd, inferredFromMeta);
+  const inferredFromHeuristics = inferEventFromHtmlHeuristics(pageHtml);
+  const merged = mergeScrapedEventData(
+    mergeScrapedEventData(inferredFromJsonLd, inferredFromMeta),
+    inferredFromHeuristics
+  );
+  const venueGeo = await geocodeVenueLocation({
+    venue_name: merged.venue_name,
+    city: merged.city,
+    state: merged.state,
+    country: merged.country,
+  });
+  const finalState = pickString(venueGeo?.state, merged.state);
+  const finalCountry = inferCountryFromState(finalState, pickString(venueGeo?.country, merged.country));
+  const finalStateCode = pickString(
+    venueGeo?.state_code,
+    normalizeUsStateCode(finalState),
+    merged.state_code
+  );
+  const finalSchool = pickBestSchoolName(
+    merged.school,
+    inferredFromHeuristics.school,
+    inferredFromMeta.school,
+    inferredFromJsonLd.school
+  );
 
   let normalizedEventUrl = pickString(merged.url, response.url, targetUrl.toString());
   try {
@@ -945,11 +1242,14 @@ router.get('/scrape-event', async (req, res) => {
     fetched_url: pickString(response.url, targetUrl.toString()),
     event: {
       name: merged.name || '',
-      school: merged.school || '',
+      school: finalSchool || '',
       city: merged.city || '',
-      state: merged.state || '',
-      country: merged.country || '',
+      state: finalState || '',
+      state_code: finalStateCode || '',
+      country: finalCountry || '',
       venue_name: merged.venue_name || '',
+      venue_latitude: venueGeo?.venue_latitude ?? merged.venue_latitude ?? null,
+      venue_longitude: venueGeo?.venue_longitude ?? merged.venue_longitude ?? null,
       start_datetime_utc: merged.start_datetime_utc || '',
       end_datetime_utc: merged.end_datetime_utc || '',
       url: normalizedEventUrl,
@@ -1332,4 +1632,8 @@ module.exports = router;
 module.exports._private = {
   buildCityCandidateTokens,
   isAmbiguousUsCityWithoutExplicitUsCountry,
+  extractUniversitySchoolName,
+  inferLocationFromHeroDetails,
+  normalizeUsStateCode,
+  pickBestSchoolName,
 };

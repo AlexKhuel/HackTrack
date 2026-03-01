@@ -213,23 +213,62 @@ function buildHotelLink(city, state, country, fromISO, toISO) {
     return `https://www.google.com/travel/hotels?q=${encodeURIComponent(query)}`;
 }
 
-function buildUberLink({ city, state, country, pickup }) {
-    const destination = [city, state, country].filter(Boolean).join(", ") || "Hackathon Venue";
+function normalizeStateCode(value) {
+    const token = (value ?? "").toString().trim().toUpperCase();
+    if (/^[A-Z]{2}$/.test(token)) return token;
+    const tail = token.match(/([A-Z]{2})$/);
+    return tail ? tail[1] : "";
+}
+
+function roundCoord(value) {
+    const num = Number(value);
+    if (!Number.isFinite(num)) return null;
+    return Math.round(num * 10000) / 10000;
+}
+
+function buildUberLink({
+    venueName,
+    city,
+    state,
+    stateCode,
+    country,
+    venueLatitude,
+    venueLongitude,
+    pickup,
+}) {
+    const resolvedStateCode = normalizeStateCode(stateCode);
+    const addressLine1 = pickText(venueName, `${city} Hackathon`, "Hackathon Venue");
+    const addressLine2 = pickText(
+        [city, resolvedStateCode || state].filter(Boolean).join(", "),
+        [city, country].filter(Boolean).join(", "),
+        city,
+        country,
+        "Hackathon Venue",
+    );
+    const drop = {
+        addressLine1,
+        addressLine2,
+        source: "SEARCH",
+    };
+    const lat = roundCoord(venueLatitude);
+    const lon = roundCoord(venueLongitude);
+    if (Number.isFinite(lat) && Number.isFinite(lon)) {
+        drop.latitude = lat;
+        drop.longitude = lon;
+    }
+
     const params = new URLSearchParams();
-    params.set("action", "setPickup");
-    params.set("dropoff[nickname]", destination);
-    params.set("dropoff[formatted_address]", destination);
+    params.set("drop[0]", JSON.stringify(drop));
 
     if (Number.isFinite(pickup?.latitude) && Number.isFinite(pickup?.longitude)) {
         params.set("pickup[latitude]", pickup.latitude.toFixed(6));
         params.set("pickup[longitude]", pickup.longitude.toFixed(6));
+        const pickupLabel = pickText(pickup?.label, "Current location");
+        params.set("pickup[nickname]", pickupLabel);
+        params.set("pickup[formatted_address]", pickupLabel);
     }
 
-    const pickupLabel = pickText(pickup?.label, "Your location");
-    params.set("pickup[nickname]", pickupLabel);
-    params.set("pickup[formatted_address]", pickupLabel);
-
-    return `https://m.uber.com/ul/?${params.toString()}`;
+    return `http://m.uber.com/go/product-selection?${params.toString()}`;
 }
 
 function isHttpUrl(value) {
@@ -241,6 +280,11 @@ function isHttpUrl(value) {
     } catch {
         return false;
     }
+}
+
+function toMarkdownLink(label, url) {
+    if (!isHttpUrl(url)) return "Unknown";
+    return `[${label}](${url})`;
 }
 
 function normalizeEventContext(hackathon, scrapedEvent) {
@@ -258,13 +302,21 @@ function normalizeEventContext(hackathon, scrapedEvent) {
     const eventUrl = pickText(scrapedEvent?.url, hackathon?.url, event?.url, "Unknown");
     const originAirport = pickText(route?.origin_airport, "Unknown");
     const destinationAirport = pickText(route?.destination_airport, "Unknown");
+    const stateCode = pickText(scrapedEvent?.state_code);
+    const venueName = pickText(scrapedEvent?.venue_name);
+    const venueLatitude = toFiniteNumberOrNull(scrapedEvent?.venue_latitude);
+    const venueLongitude = toFiniteNumberOrNull(scrapedEvent?.venue_longitude);
 
     return {
         name,
         school,
         city,
         state,
+        stateCode,
         country,
+        venueName,
+        venueLatitude,
+        venueLongitude,
         fromISO,
         toISO,
         eventUrl,
@@ -303,13 +355,20 @@ function buildJournalMarkdown({ hackathon, scrapedEvent, pickup }) {
         details.toISO,
     );
     const uber = buildUberLink({
+        venueName: details.venueName,
         city: details.city,
         state: details.state === "Unknown" ? "" : details.state,
+        stateCode: details.stateCode,
         country: details.country,
+        venueLatitude: details.venueLatitude,
+        venueLongitude: details.venueLongitude,
         pickup,
     });
 
-    const eventLink = isHttpUrl(details.eventUrl) ? details.eventUrl : "Unknown";
+    const eventLink = toMarkdownLink("Event Page", details.eventUrl);
+    const flightsLink = toMarkdownLink("Google Flights", flights);
+    const hotelLink = toMarkdownLink("Hotel Search", hotels);
+    const uberLink = toMarkdownLink("Uber Ride", uber);
     const dateRange = formatDateRangeJournal(details.fromISO, details.toISO);
 
     return [
@@ -331,9 +390,9 @@ function buildJournalMarkdown({ hackathon, scrapedEvent, pickup }) {
         "",
         "## Links",
         `- Event Link: ${eventLink}`,
-        `- Google Flights (round trip): ${flights}`,
-        `- Hotel Search: ${hotels}`,
-        `- Uber: ${uber}`,
+        `- Google Flights (round trip): ${flightsLink}`,
+        `- Hotel Search: ${hotelLink}`,
+        `- Uber: ${uberLink}`,
     ].join("\n");
 }
 
