@@ -9,6 +9,8 @@ const FILTER_INPUT =
 const FILTER_LABEL =
     "text-xs font-semibold uppercase tracking-[0.25em] text-[var(--cream)] font-['Space_Mono',monospace]";
 const ACTION_BUTTON = "btn-ghost";
+const LOCATION_NOTE =
+    "Copy Journal may ask for location (optional) to prefill Uber pickup in the generated link.";
 
 function SkeletonCard() {
     return (
@@ -627,7 +629,11 @@ export default function ResultsList({
 
         setCopyStates((prev) => ({
             ...prev,
-            [id]: { status: "loading", message: "Scraping and building journal..." },
+            [id]: {
+                status: "loading",
+                message:
+                    "Scraping and building journal (location is optional and only used for Uber pickup prefill)...",
+            },
         }));
 
         try {
@@ -693,6 +699,9 @@ export default function ResultsList({
                 <div className="text-3xl font-black tracking-[-0.02em] sm:text-4xl">
                     {filteredAndSorted.length} HACKATHONS FOUND
                 </div>
+            </div>
+            <div className="mt-2 text-xs text-[var(--muted)] font-['Space_Mono',monospace]">
+                {LOCATION_NOTE}
             </div>
 
             <div className="mt-6 border-y border-white/10 py-4">
@@ -953,6 +962,7 @@ export default function ResultsList({
                                         <button
                                             type="button"
                                             className={ACTION_BUTTON}
+                                            title="May ask for location (optional) to prefill Uber pickup in the copied journal"
                                             style={{
                                                 padding: "0.4rem 1rem",
                                                 fontSize: "0.8rem",
