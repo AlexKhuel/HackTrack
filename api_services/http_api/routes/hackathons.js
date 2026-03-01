@@ -20,6 +20,8 @@ const CITY_GEO_CACHE = new Map();
 const MAX_CITY_GEO_CACHE_ENTRIES = 5000;
 const GEO_TIMEOUT_MS = 3500;
 const GEO_RESULT_COUNT = 10;
+const SCRAPE_TIMEOUT_MS = 6500;
+const MAX_SCRAPE_HTML_LENGTH = 1_000_000;
 const DRIVE_AIRPORT_CLUSTERS = [
   new Set(['LAX', 'SNA', 'LGB', 'ONT', 'BUR']),
 ];
@@ -35,6 +37,330 @@ const US_COUNTRY_TOKENS = new Set([
   'u s a',
   'america',
 ]);
+
+function decodeHtmlEntities(value) {
+  return String(value ?? '')
+    .replace(/&nbsp;/gi, ' ')
+    .replace(/&amp;/gi, '&')
+    .replace(/&lt;/gi, '<')
+    .replace(/&gt;/gi, '>')
+    .replace(/&quot;/gi, '"')
+    .replace(/&#39;/gi, "'");
+}
+
+function collapseWhitespace(value) {
+  return decodeHtmlEntities(value).replace(/\s+/g, ' ').trim();
+}
+
+function stripHtml(value) {
+  return collapseWhitespace(String(value ?? '').replace(/<[^>]*>/g, ' '));
+}
+
+function extractHtmlAttribute(tagHtml, attrName) {
+  const safeAttr = String(attrName ?? '').replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const match = String(tagHtml ?? '').match(
+    new RegExp(`${safeAttr}\\s*=\\s*("([^"]*)"|'([^']*)'|([^\\s>]+))`, 'i')
+  );
+  if (!match) return '';
+  return collapseWhitespace(match[2] ?? match[3] ?? match[4] ?? '');
+}
+
+function extractMetaContent(html, predicate) {
+  const tags = String(html ?? '').match(/<meta\b[^>]*>/gi) ?? [];
+  for (const tag of tags) {
+    const name = extractHtmlAttribute(tag, 'name').toLowerCase();
+    const property = extractHtmlAttribute(tag, 'property').toLowerCase();
+    const itemprop = extractHtmlAttribute(tag, 'itemprop').toLowerCase();
+    const key = name || property || itemprop;
+    if (!key) continue;
+    if (!predicate(key, { name, property, itemprop })) continue;
+    const content = extractHtmlAttribute(tag, 'content');
+    if (content) return content;
+  }
+  return '';
+}
+
+function getJsonLdScripts(html) {
+  const scripts = [];
+  const re = /<script\b[^>]*type\s*=\s*["']application\/ld\+json["'][^>]*>([\s\S]*?)<\/script>/gi;
+  let match;
+  while ((match = re.exec(String(html ?? '')) != null)) {
+    const raw = (match[1] ?? '').trim().replace(/^<!--/, '').replace(/-->$/, '').trim();
+    if (raw) scripts.push(raw);
+  }
+  return scripts;
+}
+
+function flattenJsonLdNodes(node, output) {
+  if (node == null) return;
+  if (Array.isArray(node)) {
+    for (const child of node) flattenJsonLdNodes(child, output);
+    return;
+  }
+  if (typeof node !== 'object') return;
+
+  output.push(node);
+  if (Array.isArray(node['@graph'])) {
+    flattenJsonLdNodes(node['@graph'], output);
+  }
+}
+
+function parseJsonLdNodes(html) {
+  const nodes = [];
+  const scripts = getJsonLdScripts(html);
+  for (const script of scripts) {
+    try {
+      const parsed = JSON.parse(script);
+      flattenJsonLdNodes(parsed, nodes);
+    } catch {
+      // Skip malformed JSON-LD blocks.
+    }
+  }
+  return nodes;
+}
+
+function toTypeTokens(value) {
+  if (Array.isArray(value)) {
+    return value
+      .map((entry) => collapseWhitespace(entry).toLowerCase())
+      .filter(Boolean);
+  }
+  const token = collapseWhitespace(value).toLowerCase();
+  return token ? [token] : [];
+}
+
+function isJsonLdType(node, typeToken) {
+  const expected = collapseWhitespace(typeToken).toLowerCase();
+  if (!expected) return false;
+  return toTypeTokens(node?.['@type']).some((token) => token === expected || token.endsWith(`/${expected}`));
+}
+
+function toObjectLike(value) {
+  return value != null && typeof value === 'object' && !Array.isArray(value) ? value : null;
+}
+
+function pickString(...candidates) {
+  for (const candidate of candidates) {
+    const text = collapseWhitespace(candidate);
+    if (text) return text;
+  }
+  return '';
+}
+
+function parseCountryToken(value) {
+  if (typeof value === 'string') return collapseWhitespace(value);
+  if (value != null && typeof value === 'object') {
+    return pickString(value.name, value['@id']);
+  }
+  return '';
+}
+
+function parseLooseLocationString(value) {
+  const tokens = collapseWhitespace(value)
+    .split(',')
+    .map((token) => collapseWhitespace(token))
+    .filter(Boolean);
+
+  if (tokens.length >= 3) {
+    return {
+      city: tokens[tokens.length - 3],
+      state: tokens[tokens.length - 2],
+      country: tokens[tokens.length - 1],
+    };
+  }
+  if (tokens.length === 2) {
+    return { city: tokens[0], state: '', country: tokens[1] };
+  }
+  return { city: tokens[0] ?? '', state: '', country: '' };
+}
+
+function parseLocationNode(locationNode) {
+  if (!locationNode) return { venue_name: '', city: '', state: '', country: '' };
+  if (typeof locationNode === 'string') {
+    return { venue_name: '', ...parseLooseLocationString(locationNode) };
+  }
+
+  const location = toObjectLike(locationNode) ?? {};
+  const address = toObjectLike(location.address) ?? location;
+
+  return {
+    venue_name: pickString(location.name),
+    city: pickString(address.addressLocality, address.locality, address.city),
+    state: pickString(address.addressRegion, address.region, address.state, address.stateCode),
+    country: parseCountryToken(address.addressCountry ?? address.country),
+  };
+}
+
+function normalizeScrapedDate(value) {
+  const text = collapseWhitespace(value);
+  if (!text) return '';
+
+  const iso = DateTime.fromISO(text, { setZone: true });
+  if (iso.isValid) return iso.toUTC().toISO();
+
+  const httpDate = DateTime.fromHTTP(text, { zone: 'utc' });
+  if (httpDate.isValid) return httpDate.toUTC().toISO();
+
+  const rfc = DateTime.fromRFC2822(text, { zone: 'utc' });
+  if (rfc.isValid) return rfc.toUTC().toISO();
+
+  const jsDate = new Date(text);
+  if (!Number.isNaN(jsDate.getTime())) {
+    return DateTime.fromJSDate(jsDate, { zone: 'utc' }).toUTC().toISO();
+  }
+  return '';
+}
+
+function inferEventFromJsonLd(nodes) {
+  const eventNode = nodes.find((node) => isJsonLdType(node, 'event'));
+  if (!eventNode) {
+    return {
+      name: '',
+      school: '',
+      city: '',
+      state: '',
+      country: '',
+      venue_name: '',
+      start_datetime_utc: '',
+      end_datetime_utc: '',
+      url: '',
+      source: '',
+    };
+  }
+
+  const organizer = toObjectLike(eventNode.organizer) ?? {};
+  const locationNodes = Array.isArray(eventNode.location) ? eventNode.location : [eventNode.location];
+  const parsedLocations = locationNodes.map(parseLocationNode);
+  const bestLocation = parsedLocations.find((entry) => entry.city || entry.country) ?? parsedLocations[0] ?? {};
+
+  return {
+    name: pickString(eventNode.name),
+    school: pickString(organizer.name),
+    city: pickString(bestLocation.city),
+    state: pickString(bestLocation.state),
+    country: pickString(bestLocation.country),
+    venue_name: pickString(bestLocation.venue_name),
+    start_datetime_utc: normalizeScrapedDate(eventNode.startDate),
+    end_datetime_utc: normalizeScrapedDate(eventNode.endDate),
+    url: pickString(eventNode.url),
+    source: 'jsonld',
+  };
+}
+
+function inferEventFromMeta(html) {
+  const titleFromMeta = extractMetaContent(html, (key) =>
+    key === 'og:title' || key === 'twitter:title' || key === 'title'
+  );
+  const htmlTitle = stripHtml((String(html ?? '').match(/<title\b[^>]*>([\s\S]*?)<\/title>/i) ?? [])[1]);
+  const name = pickString(titleFromMeta, htmlTitle);
+
+  const school = extractMetaContent(html, (key) =>
+    key === 'og:site_name' || key === 'application-name' || key === 'author'
+  );
+
+  const city = extractMetaContent(html, (key) =>
+    key === 'geo.placename' || key === 'place:location:locality' || key === 'og:locality'
+  );
+  const state = extractMetaContent(html, (key) =>
+    key === 'place:location:region' || key === 'og:region'
+  );
+  const country = extractMetaContent(html, (key) =>
+    key === 'place:location:country' || key === 'og:country-name'
+  );
+
+  const startFromMeta = extractMetaContent(html, (key) =>
+    key === 'event:start_time' || key === 'event:start' || key === 'startdate'
+  );
+  const endFromMeta = extractMetaContent(html, (key) =>
+    key === 'event:end_time' || key === 'event:end' || key === 'enddate'
+  );
+
+  const timeDateTimes = [];
+  const timeRe = /<time\b[^>]*datetime\s*=\s*("([^"]*)"|'([^']*)'|([^\s>]+))/gi;
+  let timeMatch;
+  while ((timeMatch = timeRe.exec(String(html ?? '')) != null)) {
+    const token = pickString(timeMatch[2], timeMatch[3], timeMatch[4]);
+    if (token) timeDateTimes.push(token);
+  }
+
+  return {
+    name,
+    school,
+    city,
+    state,
+    country,
+    venue_name: '',
+    start_datetime_utc: normalizeScrapedDate(startFromMeta || timeDateTimes[0]),
+    end_datetime_utc: normalizeScrapedDate(endFromMeta || timeDateTimes[1]),
+    url: extractMetaContent(html, (key) => key === 'og:url' || key === 'canonical'),
+    source: 'meta',
+  };
+}
+
+function mergeScrapedEventData(primary, fallback) {
+  return {
+    name: pickString(primary?.name, fallback?.name),
+    school: pickString(primary?.school, fallback?.school),
+    city: pickString(primary?.city, fallback?.city),
+    state: pickString(primary?.state, fallback?.state),
+    country: pickString(primary?.country, fallback?.country),
+    venue_name: pickString(primary?.venue_name, fallback?.venue_name),
+    start_datetime_utc: pickString(primary?.start_datetime_utc, fallback?.start_datetime_utc),
+    end_datetime_utc: pickString(primary?.end_datetime_utc, fallback?.end_datetime_utc),
+    url: pickString(primary?.url, fallback?.url),
+    source: pickString(primary?.source, fallback?.source),
+  };
+}
+
+function isPrivateIpv4Host(hostname) {
+  const octets = String(hostname ?? '')
+    .split('.')
+    .map((part) => Number(part));
+  if (octets.length !== 4 || octets.some((octet) => !Number.isInteger(octet) || octet < 0 || octet > 255)) {
+    return false;
+  }
+  if (octets[0] === 10 || octets[0] === 127 || octets[0] === 0) return true;
+  if (octets[0] === 169 && octets[1] === 254) return true;
+  if (octets[0] === 192 && octets[1] === 168) return true;
+  if (octets[0] === 172 && octets[1] >= 16 && octets[1] <= 31) return true;
+  return false;
+}
+
+function isBlockedScrapeHostname(hostname) {
+  const host = String(hostname ?? '').trim().toLowerCase();
+  if (!host) return true;
+  const isIpv6Host = host.includes(':');
+  if (host === 'localhost' || host.endsWith('.localhost')) return true;
+  if (host === '::1' || host === '0:0:0:0:0:0:0:1') return true;
+  if (isIpv6Host && host.startsWith('fe80:')) return true;
+  if (isIpv6Host && (host.startsWith('fc') || host.startsWith('fd'))) return true;
+  if (host.endsWith('.local')) return true;
+  if (isPrivateIpv4Host(host)) return true;
+  return false;
+}
+
+function normalizeScrapeTargetUrl(rawUrl) {
+  const candidate = String(rawUrl ?? '').trim();
+  if (!candidate) throw new Error('url query param is required');
+
+  let parsed;
+  try {
+    parsed = new URL(candidate);
+  } catch {
+    throw new Error('Invalid url query param');
+  }
+
+  if (parsed.protocol !== 'https:' && parsed.protocol !== 'http:') {
+    throw new Error('Only http/https URLs are supported');
+  }
+
+  if (isBlockedScrapeHostname(parsed.hostname)) {
+    throw new Error('URL host is not allowed');
+  }
+
+  parsed.hash = '';
+  return parsed;
+}
 
 function normalizeAirportCode(value) {
   if (typeof value !== 'string') return null;
@@ -552,6 +878,85 @@ async function resolveNearestAirportFromRoutes(eventCity, eventCountry, routeDes
 
   return bestAirport;
 }
+
+/**
+ * GET /api/hackathons/scrape-event?url=https://example.com/event
+ *
+ * Scrapes a hackathon page and extracts event metadata (name, location, dates, etc.)
+ * from JSON-LD and common HTML meta tags.
+ */
+router.get('/scrape-event', async (req, res) => {
+  let targetUrl;
+  try {
+    targetUrl = normalizeScrapeTargetUrl(req.query.url);
+  } catch (err) {
+    return res.status(400).json({ error: err.message });
+  }
+
+  const abortController = new AbortController();
+  const timeoutHandle = setTimeout(() => abortController.abort(), SCRAPE_TIMEOUT_MS);
+  let response;
+  try {
+    response = await fetch(targetUrl.toString(), {
+      method: 'GET',
+      redirect: 'follow',
+      signal: abortController.signal,
+      headers: {
+        Accept: 'text/html,application/xhtml+xml',
+        'User-Agent': 'HackTrackBot/1.0',
+      },
+    });
+  } catch (err) {
+    const message = abortController.signal.aborted
+      ? `Timed out fetching ${targetUrl.toString()}`
+      : `Failed to fetch ${targetUrl.toString()}`;
+    return res.status(502).json({ error: `${message}: ${err?.message ?? 'request_failed'}` });
+  } finally {
+    clearTimeout(timeoutHandle);
+  }
+
+  if (!response.ok) {
+    return res.status(502).json({
+      error: `Failed to fetch ${targetUrl.toString()} (status ${response.status})`,
+    });
+  }
+
+  let html = '';
+  try {
+    html = await response.text();
+  } catch (err) {
+    return res.status(502).json({ error: `Failed to read response body: ${err?.message ?? 'read_failed'}` });
+  }
+
+  const pageHtml = html.slice(0, MAX_SCRAPE_HTML_LENGTH);
+  const jsonLdNodes = parseJsonLdNodes(pageHtml);
+  const inferredFromJsonLd = inferEventFromJsonLd(jsonLdNodes);
+  const inferredFromMeta = inferEventFromMeta(pageHtml);
+  const merged = mergeScrapedEventData(inferredFromJsonLd, inferredFromMeta);
+
+  let normalizedEventUrl = pickString(merged.url, response.url, targetUrl.toString());
+  try {
+    normalizedEventUrl = new URL(normalizedEventUrl, response.url || targetUrl.toString()).toString();
+  } catch {
+    normalizedEventUrl = pickString(response.url, targetUrl.toString());
+  }
+
+  return res.json({
+    fetched_url: pickString(response.url, targetUrl.toString()),
+    event: {
+      name: merged.name || '',
+      school: merged.school || '',
+      city: merged.city || '',
+      state: merged.state || '',
+      country: merged.country || '',
+      venue_name: merged.venue_name || '',
+      start_datetime_utc: merged.start_datetime_utc || '',
+      end_datetime_utc: merged.end_datetime_utc || '',
+      url: normalizedEventUrl,
+      source: merged.source || 'none',
+    },
+  });
+});
 
 /**
  * GET /api/hackathons/feasible

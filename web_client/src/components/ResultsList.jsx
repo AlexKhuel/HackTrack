@@ -1,21 +1,14 @@
-import { useEffect, useMemo, useState } from "react";
-import { fetchFeasibleHackathons } from "../utils/api";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
-    disconnectOpenNote,
-    exportHackathonToOpenNote,
-    fetchOpenNoteStatus,
-    startOpenNoteOAuth,
-} from "../utils/auth";
+    fetchFeasibleHackathons,
+    fetchScrapedHackathonEvent,
+} from "../utils/api";
 
 const FILTER_INPUT =
     "w-48 bg-[rgba(245,237,214,0.07)] border border-[var(--border)] rounded-[6px] px-3 py-2 text-[var(--cream)] outline-none focus:border-[var(--teal)] font-['Syne',sans-serif]";
 const FILTER_LABEL =
     "text-xs font-semibold uppercase tracking-[0.25em] text-[var(--cream)] font-['Space_Mono',monospace]";
-const EXPORT_BUTTON =
-    "btn-ghost";
-const AUTH_STATUS = {
-    SIGNED_IN: "signed_in",
-};
+const ACTION_BUTTON = "btn-ghost";
 
 function SkeletonCard() {
     return (
@@ -181,6 +174,243 @@ function toFiniteNumberOrNull(value) {
     return Number.isFinite(parsed) ? parsed : null;
 }
 
+function toDateOnly(isoValue) {
+    const raw = (isoValue ?? "").toString().trim();
+    if (!raw) return "";
+    const parsed = new Date(raw);
+    if (Number.isNaN(parsed.getTime())) return "";
+    return parsed.toISOString().slice(0, 10);
+}
+
+function pickText(...values) {
+    for (const value of values) {
+        const text = (value ?? "").toString().trim();
+        if (text) return text;
+    }
+    return "";
+}
+
+function buildGoogleFlightsLink({ origin, destination, departDateISO, returnDateISO }) {
+    const from = (origin ?? "").toString().trim().toUpperCase();
+    const to = (destination ?? "").toString().trim().toUpperCase();
+    const departDate = toDateOnly(departDateISO);
+    const returnDate = toDateOnly(returnDateISO);
+    if (!from || !to || !departDate || !returnDate) {
+        return "https://www.google.com/travel/flights";
+    }
+    return `https://www.google.com/travel/flights?hl=en#flt=${from}.${to}.${departDate}*${to}.${from}.${returnDate}`;
+}
+
+function buildHotelLink(city, state, country, fromISO, toISO) {
+    const destination = [city, state, country].filter(Boolean).join(", ");
+    const from = toDateOnly(fromISO);
+    const to = toDateOnly(toISO);
+    const query = [destination ? `hotels in ${destination}` : "hotels", from && to ? `${from} to ${to}` : ""]
+        .filter(Boolean)
+        .join(" ");
+    return `https://www.google.com/travel/hotels?q=${encodeURIComponent(query)}`;
+}
+
+function buildUberLink({ city, state, country, pickup }) {
+    const destination = [city, state, country].filter(Boolean).join(", ") || "Hackathon Venue";
+    const params = new URLSearchParams();
+    params.set("action", "setPickup");
+    params.set("dropoff[nickname]", destination);
+    params.set("dropoff[formatted_address]", destination);
+
+    if (Number.isFinite(pickup?.latitude) && Number.isFinite(pickup?.longitude)) {
+        params.set("pickup[latitude]", pickup.latitude.toFixed(6));
+        params.set("pickup[longitude]", pickup.longitude.toFixed(6));
+    }
+
+    const pickupLabel = pickText(pickup?.label, "Your location");
+    params.set("pickup[nickname]", pickupLabel);
+    params.set("pickup[formatted_address]", pickupLabel);
+
+    return `https://m.uber.com/ul/?${params.toString()}`;
+}
+
+function isHttpUrl(value) {
+    const text = (value ?? "").toString().trim();
+    if (!text) return false;
+    try {
+        const parsed = new URL(text);
+        return parsed.protocol === "http:" || parsed.protocol === "https:";
+    } catch {
+        return false;
+    }
+}
+
+function normalizeEventContext(hackathon, scrapedEvent) {
+    const result = hackathon?.raw_result ?? {};
+    const event = result?.event ?? {};
+    const route = result?.route ?? {};
+
+    const name = pickText(scrapedEvent?.name, hackathon?.name, event?.name, "Unknown Hackathon");
+    const city = pickText(scrapedEvent?.city, hackathon?.city, event?.city, "Unknown");
+    const state = pickText(scrapedEvent?.state, "Unknown");
+    const country = pickText(scrapedEvent?.country, hackathon?.country, event?.country, "Unknown");
+    const school = pickText(scrapedEvent?.school, "Unknown");
+    const fromISO = pickText(scrapedEvent?.start_datetime_utc, hackathon?.from, event?.start_datetime_utc);
+    const toISO = pickText(scrapedEvent?.end_datetime_utc, hackathon?.to, event?.end_datetime_utc);
+    const eventUrl = pickText(scrapedEvent?.url, hackathon?.url, event?.url, "Unknown");
+    const originAirport = pickText(route?.origin_airport, "Unknown");
+    const destinationAirport = pickText(route?.destination_airport, "Unknown");
+
+    return {
+        name,
+        school,
+        city,
+        state,
+        country,
+        fromISO,
+        toISO,
+        eventUrl,
+        originAirport,
+        destinationAirport,
+    };
+}
+
+function formatDateRangeJournal(fromISO, toISO) {
+    const from = new Date(fromISO);
+    const to = new Date(toISO);
+    if (Number.isNaN(from.getTime()) || Number.isNaN(to.getTime())) {
+        return formatDateRangeCompact(fromISO, toISO);
+    }
+    const formatter = new Intl.DateTimeFormat(undefined, {
+        year: "numeric",
+        month: "short",
+        day: "numeric",
+    });
+    return `${formatter.format(from)} - ${formatter.format(to)}`;
+}
+
+function buildJournalMarkdown({ hackathon, scrapedEvent, pickup }) {
+    const details = normalizeEventContext(hackathon, scrapedEvent);
+    const flights = buildGoogleFlightsLink({
+        origin: details.originAirport,
+        destination: details.destinationAirport,
+        departDateISO: details.fromISO,
+        returnDateISO: details.toISO,
+    });
+    const hotels = buildHotelLink(
+        details.city,
+        details.state === "Unknown" ? "" : details.state,
+        details.country,
+        details.fromISO,
+        details.toISO,
+    );
+    const uber = buildUberLink({
+        city: details.city,
+        state: details.state === "Unknown" ? "" : details.state,
+        country: details.country,
+        pickup,
+    });
+
+    const eventLink = isHttpUrl(details.eventUrl) ? details.eventUrl : "Unknown";
+    const dateRange = formatDateRangeJournal(details.fromISO, details.toISO);
+
+    return [
+        `# ${details.name}`,
+        "",
+        "## Overview",
+        `- School: ${details.school || "Unknown"}`,
+        `- City: ${details.city}`,
+        `- State: ${details.state || "Unknown"}`,
+        `- Country: ${details.country}`,
+        `- Date Range: ${dateRange}`,
+        "",
+        "## Travel & Cost",
+        `- Origin Airport: ${details.originAirport}`,
+        `- Destination Airport: ${details.destinationAirport}`,
+        `- Estimated Flight Cost: ${formatUSD(hackathon?.estimated_flight_cost)}`,
+        `- Estimated Lodging Cost: ${formatUSD(hackathon?.estimated_lodging_cost)}`,
+        `- Estimated Total Cost: ${formatUSD(hackathon?.estimated_cost)}`,
+        "",
+        "## Links",
+        `- Event Link: ${eventLink}`,
+        `- Google Flights (round trip): ${flights}`,
+        `- Hotel Search: ${hotels}`,
+        `- Uber: ${uber}`,
+    ].join("\n");
+}
+
+async function copyTextToClipboard(text) {
+    const payload = String(text ?? "");
+    if (!payload) throw new Error("Nothing to copy.");
+
+    if (navigator?.clipboard?.writeText) {
+        await navigator.clipboard.writeText(payload);
+        return;
+    }
+
+    const textarea = document.createElement("textarea");
+    textarea.value = payload;
+    textarea.style.position = "fixed";
+    textarea.style.opacity = "0";
+    document.body.appendChild(textarea);
+    textarea.focus();
+    textarea.select();
+    document.execCommand("copy");
+    document.body.removeChild(textarea);
+}
+
+function requestBrowserGeolocation() {
+    if (!navigator?.geolocation?.getCurrentPosition) {
+        return Promise.resolve(null);
+    }
+    return new Promise((resolve) => {
+        navigator.geolocation.getCurrentPosition(
+            (position) => {
+                const latitude = Number(position?.coords?.latitude);
+                const longitude = Number(position?.coords?.longitude);
+                if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) {
+                    resolve(null);
+                    return;
+                }
+                resolve({ latitude, longitude });
+            },
+            () => resolve(null),
+            {
+                enableHighAccuracy: false,
+                timeout: 2500,
+                maximumAge: 5 * 60 * 1000,
+            },
+        );
+    });
+}
+
+function buildPickupContext(formData, originAirport, geo) {
+    const airport = pickText(
+        originAirport,
+        formData?.primary_airport_code,
+        formData?.secondary_airport_code,
+        formData?.tertiary_airport_code,
+    );
+    const country = pickText(formData?.country);
+    const timezone = pickText(formData?.timezone);
+
+    if (geo) {
+        return {
+            label: "Current location",
+            latitude: geo.latitude,
+            longitude: geo.longitude,
+        };
+    }
+
+    if (airport) {
+        return { label: `${airport} airport area`, latitude: null, longitude: null };
+    }
+    if (country && timezone) {
+        return { label: `${country} (${timezone})`, latitude: null, longitude: null };
+    }
+    return {
+        label: pickText(country, timezone, "Your location"),
+        latitude: null,
+        longitude: null,
+    };
+}
+
 function mapFeasibleResult(result, index) {
     const event = result?.event ?? {};
     const route = result?.route ?? {};
@@ -237,10 +467,6 @@ function mapFeasibleResult(result, index) {
 
 export default function ResultsList({
     formData,
-    authStatus,
-    sessionToken,
-    openNoteCallback,
-    onConsumeOpenNoteCallback,
 }) {
     const friends = useMemo(
         () => splitFriendCities(formData?.friend_cities),
@@ -258,17 +484,8 @@ export default function ResultsList({
     const [maxOneWayHoursFilter, setMaxOneWayHoursFilter] = useState("");
     const [minPrizePool, setMinPrizePool] = useState("");
     const [showFilters, setShowFilters] = useState(false);
-    const [openNoteStatusLoading, setOpenNoteStatusLoading] = useState(false);
-    const [openNoteConnected, setOpenNoteConnected] = useState(false);
-    const [openNoteAccount, setOpenNoteAccount] = useState(null);
-    const [openNoteErrorText, setOpenNoteErrorText] = useState("");
-    const [openNoteConnectBusy, setOpenNoteConnectBusy] = useState(false);
-    const [disconnectBusy, setDisconnectBusy] = useState(false);
-    const [exportStates, setExportStates] = useState({});
-
-    const isSignedIn = authStatus === AUTH_STATUS.SIGNED_IN;
-    const callbackStatus = (openNoteCallback?.status ?? "").toString();
-    const callbackError = (openNoteCallback?.error ?? "").toString();
+    const [copyStates, setCopyStates] = useState({});
+    const geoCacheRef = useRef({ attempted: false, value: null });
 
     const filteredAndSorted = useMemo(() => {
         const maxHText = (maxOneWayHoursFilter ?? "").toString().trim();
@@ -373,7 +590,7 @@ export default function ResultsList({
         const abortController = new AbortController();
         setIsLoading(true);
         setErrorText("");
-        setExportStates({});
+        setCopyStates({});
 
         fetchFeasibleHackathons(formData, { signal: abortController.signal })
             .then((payload) => {
@@ -404,129 +621,55 @@ export default function ResultsList({
         };
     }, [formData]);
 
-    useEffect(() => {
-        if (!isSignedIn || !sessionToken) {
-            setOpenNoteConnected(false);
-            setOpenNoteAccount(null);
-            setOpenNoteStatusLoading(false);
-            setOpenNoteErrorText("");
-            return;
-        }
+    const handleCopyJournal = async (hackathon) => {
+        const id = String(hackathon?.id ?? "");
+        if (!id) return;
 
-        let cancelled = false;
-        setOpenNoteStatusLoading(true);
-        fetchOpenNoteStatus(sessionToken)
-            .then((payload) => {
-                if (cancelled) return;
-                setOpenNoteConnected(Boolean(payload?.connected));
-                setOpenNoteAccount(payload?.account ?? null);
-                setOpenNoteErrorText("");
-            })
-            .catch((err) => {
-                if (cancelled) return;
-                setOpenNoteConnected(false);
-                setOpenNoteAccount(null);
-                setOpenNoteErrorText(
-                    err instanceof Error
-                        ? err.message
-                        : "Failed to load OpenNote status.",
-                );
-            })
-            .finally(() => {
-                if (cancelled) return;
-                setOpenNoteStatusLoading(false);
-            });
-
-        return () => {
-            cancelled = true;
-        };
-    }, [isSignedIn, sessionToken, callbackStatus]);
-
-    useEffect(() => {
-        if (!callbackStatus) return;
-        const params = new URLSearchParams(window.location.search);
-        params.delete("opennote");
-        params.delete("opennote_error");
-        const next = `?${params.toString()}`;
-        window.history.replaceState({}, "", next === "?" ? window.location.pathname : next);
-        onConsumeOpenNoteCallback?.();
-    }, [callbackStatus, onConsumeOpenNoteCallback]);
-
-    const handleConnectOpenNote = async () => {
-        if (!isSignedIn || !sessionToken || openNoteConnectBusy) return;
-        setOpenNoteConnectBusy(true);
-        setOpenNoteErrorText("");
-        try {
-            const returnTo = `${window.location.pathname}${window.location.search}`;
-            const payload = await startOpenNoteOAuth(sessionToken, returnTo);
-            const authorizationUrl = (payload?.authorization_url ?? "")
-                .toString()
-                .trim();
-            if (!authorizationUrl) {
-                throw new Error("OpenNote OAuth URL was not returned by the server.");
-            }
-            window.location.assign(authorizationUrl);
-        } catch (err) {
-            setOpenNoteErrorText(
-                err instanceof Error
-                    ? err.message
-                    : "Failed to start OpenNote OAuth.",
-            );
-        } finally {
-            setOpenNoteConnectBusy(false);
-        }
-    };
-
-    const handleDisconnectOpenNote = async () => {
-        if (!isSignedIn || !sessionToken || disconnectBusy) return;
-        setDisconnectBusy(true);
-        setOpenNoteErrorText("");
-        try {
-            await disconnectOpenNote(sessionToken);
-            setOpenNoteConnected(false);
-            setOpenNoteAccount(null);
-        } catch (err) {
-            setOpenNoteErrorText(
-                err instanceof Error ? err.message : "Failed to disconnect OpenNote.",
-            );
-        } finally {
-            setDisconnectBusy(false);
-        }
-    };
-
-    const handleExportHackathon = async (hackathon) => {
-        const hackathonId = String(hackathon?.id ?? "");
-        if (!hackathonId || !isSignedIn || !sessionToken || !openNoteConnected) return;
-
-        setExportStates((prev) => ({
+        setCopyStates((prev) => ({
             ...prev,
-            [hackathonId]: { status: "loading", message: "" },
+            [id]: { status: "loading", message: "Scraping and building journal..." },
         }));
 
         try {
-            const payload = await exportHackathonToOpenNote(
-                sessionToken,
-                hackathon?.raw_result,
+            const result = hackathon?.raw_result ?? {};
+            const route = result?.route ?? {};
+
+            let scrapedEvent = null;
+            const eventUrl = pickText(hackathon?.url);
+            if (isHttpUrl(eventUrl)) {
+                try {
+                    scrapedEvent = await fetchScrapedHackathonEvent(eventUrl);
+                } catch {
+                    // Fallback to existing event payload when scraping fails.
+                }
+            }
+
+            if (!geoCacheRef.current.attempted) {
+                geoCacheRef.current.attempted = true;
+                geoCacheRef.current.value = await requestBrowserGeolocation();
+            }
+            const pickup = buildPickupContext(
+                formData,
+                pickText(route?.origin_airport),
+                geoCacheRef.current.value,
             );
-            const statusText =
-                payload?.status === "updated" ? "Updated in OpenNote." : "Saved to OpenNote.";
-            setExportStates((prev) => ({
+
+            const markdown = buildJournalMarkdown({
+                hackathon,
+                scrapedEvent,
+                pickup,
+            });
+            await copyTextToClipboard(markdown);
+            setCopyStates((prev) => ({
                 ...prev,
-                [hackathonId]: {
-                    status: "success",
-                    message: statusText,
-                    journalUrl: payload?.journal_url || "",
-                },
+                [id]: { status: "success", message: "Journal copied to clipboard." },
             }));
         } catch (err) {
-            setExportStates((prev) => ({
+            setCopyStates((prev) => ({
                 ...prev,
-                [hackathonId]: {
+                [id]: {
                     status: "error",
-                    message:
-                        err instanceof Error
-                            ? err.message
-                            : "Failed to export this hackathon.",
+                    message: err instanceof Error ? err.message : "Failed to copy journal.",
                 },
             }));
         }
@@ -551,58 +694,6 @@ export default function ResultsList({
                     {filteredAndSorted.length} HACKATHONS FOUND
                 </div>
             </div>
-
-            {callbackStatus === "connected" ? (
-                <div className="mt-4 rounded-[8px] border border-[rgba(0,229,204,0.5)] bg-[rgba(0,229,204,0.12)] px-4 py-3 text-sm">
-                    OpenNote account connected. You can now export hackathons.
-                </div>
-            ) : null}
-
-            {callbackStatus === "error" ? (
-                <div className="mt-4 rounded-[8px] border border-[rgba(228,3,46,0.5)] bg-[rgba(228,3,46,0.12)] px-4 py-3 text-sm">
-                    OpenNote connection failed: {callbackError || "unknown_error"}
-                </div>
-            ) : null}
-
-            {isSignedIn ? (
-                <div className="mt-4 flex flex-wrap items-center gap-3 text-xs font-semibold uppercase tracking-[0.2em] text-[var(--muted)]">
-                    <span>
-                        {openNoteStatusLoading
-                            ? "Checking OpenNote..."
-                            : openNoteConnected
-                              ? `OpenNote connected${openNoteAccount?.name ? `: ${openNoteAccount.name}` : ""}`
-                              : "OpenNote not connected"}
-                    </span>
-                    {!openNoteStatusLoading && !openNoteConnected ? (
-                        <button
-                            type="button"
-                            onClick={handleConnectOpenNote}
-                            disabled={openNoteConnectBusy}
-                            className={EXPORT_BUTTON}
-                            style={{ padding: "0.35rem 0.8rem", fontSize: "0.72rem" }}
-                        >
-                            {openNoteConnectBusy ? "Connecting..." : "Connect OpenNote"}
-                        </button>
-                    ) : null}
-                    {!openNoteStatusLoading && openNoteConnected ? (
-                        <button
-                            type="button"
-                            onClick={handleDisconnectOpenNote}
-                            disabled={disconnectBusy}
-                            className={EXPORT_BUTTON}
-                            style={{ padding: "0.35rem 0.8rem", fontSize: "0.72rem" }}
-                        >
-                            {disconnectBusy ? "Disconnecting..." : "Disconnect"}
-                        </button>
-                    ) : null}
-                </div>
-            ) : null}
-
-            {openNoteErrorText ? (
-                <div className="mt-3 text-xs font-semibold uppercase tracking-[0.2em] text-[#e4032e]">
-                    {openNoteErrorText}
-                </div>
-            ) : null}
 
             <div className="mt-6 border-y border-white/10 py-4">
                 <button
@@ -720,31 +811,11 @@ export default function ResultsList({
                         const hotelShareSavingsLabel = formatUSD(
                             hotelShareSavings,
                         );
-                        const exportState = exportStates[h.id] ?? {
+                        const copyState = copyStates[h.id] ?? {
                             status: "idle",
                             message: "",
-                            journalUrl: "",
                         };
-                        const isExporting = exportState.status === "loading";
-                        const canExportToOpenNote =
-                            isSignedIn &&
-                            openNoteConnected &&
-                            !openNoteStatusLoading;
-                        const exportButtonLabel = !isSignedIn
-                            ? "Sign in to export"
-                            : openNoteStatusLoading
-                              ? "Checking OpenNote..."
-                              : !openNoteConnected
-                                ? "Connect OpenNote"
-                                : isExporting
-                                  ? "Exporting..."
-                                  : "Add to OpenNote";
-                        const exportButtonDisabled =
-                            !isSignedIn ||
-                            openNoteStatusLoading ||
-                            isExporting ||
-                            openNoteConnectBusy ||
-                            disconnectBusy;
+                        const isCopying = copyState.status === "loading";
                         return (
                             <article
                                 key={h.id}
@@ -881,30 +952,24 @@ export default function ResultsList({
                                     <div className="flex flex-wrap items-center gap-2">
                                         <button
                                             type="button"
-                                            className="btn-ghost"
+                                            className={ACTION_BUTTON}
                                             style={{
                                                 padding: "0.4rem 1rem",
                                                 fontSize: "0.8rem",
-                                                opacity: exportButtonDisabled ? 0.6 : 1,
+                                                opacity: isCopying ? 0.6 : 1,
                                             }}
-                                            disabled={exportButtonDisabled}
+                                            disabled={isCopying}
                                             onClick={() => {
-                                                if (!isSignedIn) return;
-                                                if (!openNoteConnected) {
-                                                    void handleConnectOpenNote();
-                                                    return;
-                                                }
-                                                if (!canExportToOpenNote) return;
-                                                void handleExportHackathon(h);
+                                                void handleCopyJournal(h);
                                             }}
                                         >
-                                            {exportButtonLabel}
+                                            {isCopying ? "Copying..." : "Copy Journal"}
                                         </button>
                                         <a
                                             href={h.url}
                                             target="_blank"
                                             rel="noreferrer"
-                                            className="btn-ghost"
+                                            className={ACTION_BUTTON}
                                             style={{
                                                 padding: "0.4rem 1rem",
                                                 fontSize: "0.8rem",
@@ -915,29 +980,15 @@ export default function ResultsList({
                                     </div>
                                 </div>
 
-                                {exportState.message ? (
+                                {copyState.message ? (
                                     <div
                                         className={`mt-2 text-xs font-semibold uppercase tracking-[0.2em] ${
-                                            exportState.status === "error"
+                                            copyState.status === "error"
                                                 ? "text-[#e4032e]"
                                                 : "text-[var(--teal)]"
                                         }`}
                                     >
-                                        {exportState.message}
-                                        {exportState.status === "success" &&
-                                        exportState.journalUrl ? (
-                                            <>
-                                                {" "}
-                                                <a
-                                                    href={exportState.journalUrl}
-                                                    target="_blank"
-                                                    rel="noreferrer"
-                                                    className="underline"
-                                                >
-                                                    Open Journal
-                                                </a>
-                                            </>
-                                        ) : null}
+                                        {copyState.message}
                                     </div>
                                 ) : null}
                             </article>

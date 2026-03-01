@@ -349,4 +349,43 @@ async function fetchFeasibleHackathons(formData, options = {}) {
   return payload
 }
 
-export { fetchFeasibleHackathons }
+async function fetchScrapedHackathonEvent(eventUrl, options = {}) {
+  const rawUrl = (eventUrl ?? "").toString().trim()
+  if (!rawUrl) return null
+
+  const params = new URLSearchParams()
+  params.set("url", rawUrl)
+  const url = buildApiUrl(`/api/hackathons/scrape-event?${params.toString()}`)
+
+  let response
+  try {
+    response = await fetch(url, {
+      method: "GET",
+      signal: options.signal,
+    })
+  } catch (err) {
+    throw new Error(buildFetchErrorMessage(url, err?.message))
+  }
+
+  const raw = await response.text()
+  let payload = {}
+  if (raw) {
+    try {
+      payload = JSON.parse(raw)
+    } catch {
+      payload = { error: raw }
+    }
+  }
+
+  if (!response.ok) {
+    const message =
+      typeof payload?.error === "string" && payload.error
+        ? payload.error
+        : `Request failed (${response.status})`
+    throw new Error(message)
+  }
+
+  return payload?.event ?? null
+}
+
+export { fetchFeasibleHackathons, fetchScrapedHackathonEvent }

@@ -102,19 +102,6 @@ function parseFormFromSearch(search) {
   return { view, form }
 }
 
-function parseOpenNoteCallback(search) {
-  const params = new URLSearchParams(search)
-  const status = (params.get("opennote") ?? "").toString().trim().toLowerCase()
-  if (!status) return null
-
-  if (status !== "connected" && status !== "error") return null
-  const errorText = (params.get("opennote_error") ?? "").toString().trim()
-  return {
-    status,
-    error: errorText,
-  }
-}
-
 function serializeQueryValue(value) {
   if (Array.isArray(value)) return value.join(",")
   return (value ?? "").toString().trim()
@@ -175,14 +162,9 @@ function normalizeSavedInput(rawInput) {
 
 export default function App() {
   const initial = useMemo(() => parseFormFromSearch(window.location.search), [])
-  const initialOpenNoteCallback = useMemo(
-    () => parseOpenNoteCallback(window.location.search),
-    []
-  )
   const hasQueryBackedFormValues = useMemo(() => hasExplicitFormParams(window.location.search), [])
   const [view, setView] = useState(initial.view)
   const [form, setForm] = useState({ ...DEFAULT_FORM, ...initial.form })
-  const [openNoteCallback, setOpenNoteCallback] = useState(initialOpenNoteCallback)
 
   const [authStatus, setAuthStatus] = useState(AUTH_STATUS.SIGNED_OUT)
   const [sessionToken, setSessionToken] = useState("")
@@ -212,7 +194,6 @@ export default function App() {
       const next = parseFormFromSearch(window.location.search)
       setView(next.view)
       setForm((prev) => ({ ...prev, ...next.form }))
-      setOpenNoteCallback(parseOpenNoteCallback(window.location.search))
     }
     window.addEventListener("popstate", onPopState)
     return () => window.removeEventListener("popstate", onPopState)
@@ -403,13 +384,7 @@ export default function App() {
               {view === "form" ? (
                 <InputForm initialValues={form} onSubmit={handleSubmit} />
               ) : (
-                <ResultsList
-                  formData={form}
-                  authStatus={authStatus}
-                  sessionToken={sessionToken}
-                  openNoteCallback={openNoteCallback}
-                  onConsumeOpenNoteCallback={() => setOpenNoteCallback(null)}
-                />
+                <ResultsList formData={form} />
               )}
             </div>
           </>
