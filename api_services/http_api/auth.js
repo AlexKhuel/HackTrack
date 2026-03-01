@@ -9,12 +9,28 @@ const db = require('./db');
 const oauthClient = new OAuth2Client();
 const SESSION_TOKEN_TTL_SECONDS = 60 * 60 * 24 * 7;
 
-function requireGoogleClientId() {
-  const clientId = String(process.env.GOOGLE_CLIENT_ID || '').trim();
-  if (!clientId) {
-    throw new Error('Missing GOOGLE_CLIENT_ID in environment');
+function parseClientIds(rawValue) {
+  return String(rawValue || '')
+    .split(',')
+    .map((entry) => entry.trim())
+    .filter(Boolean);
+}
+
+function requireGoogleClientIds() {
+  const configuredIds = [
+    ...parseClientIds(process.env.GOOGLE_CLIENT_ID),
+    ...parseClientIds(process.env.GOOGLE_IOS_CLIENT_ID),
+    ...parseClientIds(process.env.GOOGLE_CLIENT_IDS),
+  ];
+  const uniqueClientIds = [...new Set(configuredIds)];
+
+  if (uniqueClientIds.length === 0) {
+    throw new Error(
+      'Missing GOOGLE_CLIENT_ID in environment (or GOOGLE_IOS_CLIENT_ID / GOOGLE_CLIENT_IDS)'
+    );
   }
-  return clientId;
+
+  return uniqueClientIds;
 }
 
 function requireJwtSecret() {
@@ -31,7 +47,7 @@ async function verifyGoogleCredential(credential) {
 
   const ticket = await oauthClient.verifyIdToken({
     idToken: token,
-    audience: requireGoogleClientId(),
+    audience: requireGoogleClientIds(),
   });
 
   const payload = ticket.getPayload();

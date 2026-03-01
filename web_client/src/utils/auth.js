@@ -1,4 +1,10 @@
+import { Capacitor } from "@capacitor/core"
+
 const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL ?? "")
+  .toString()
+  .trim()
+  .replace(/\/+$/, "")
+const IOS_API_BASE_URL = (import.meta.env.VITE_API_BASE_URL_IOS ?? "")
   .toString()
   .trim()
   .replace(/\/+$/, "")
@@ -6,8 +12,24 @@ const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL ?? "")
 const SESSION_TOKEN_STORAGE_KEY = "hacktrack.auth.token"
 
 function buildApiUrl(path) {
-  if (!API_BASE_URL) return path
-  return `${API_BASE_URL}${path}`
+  const isNativeIos = Capacitor.isNativePlatform() && Capacitor.getPlatform() === "ios"
+  const baseUrl = isNativeIos && IOS_API_BASE_URL ? IOS_API_BASE_URL : API_BASE_URL
+  if (!baseUrl) return path
+  return `${baseUrl}${path}`
+}
+
+function isLocalhostUrl(url) {
+  return /\/\/(localhost|127\.0\.0\.1)(:\d+)?(\/|$)/i.test(url)
+}
+
+function buildFetchErrorMessage(url, originalMessage = "") {
+  const isNativeIos = Capacitor.isNativePlatform() && Capacitor.getPlatform() === "ios"
+  if (isNativeIos && isLocalhostUrl(url)) {
+    return `Could not reach API at ${url}. On iPhone, localhost/127.0.0.1 points to the phone itself. Set VITE_API_BASE_URL_IOS to a reachable API URL.`
+  }
+
+  const detail = (originalMessage ?? "").toString().trim()
+  return detail ? `Could not reach API at ${url}: ${detail}` : `Could not reach API at ${url}.`
 }
 
 async function parseJsonResponse(response) {
@@ -21,7 +43,14 @@ async function parseJsonResponse(response) {
 }
 
 async function request(path, init = {}) {
-  const response = await fetch(buildApiUrl(path), init)
+  const url = buildApiUrl(path)
+  let response
+  try {
+    response = await fetch(url, init)
+  } catch (err) {
+    throw new Error(buildFetchErrorMessage(url, err?.message))
+  }
+
   const payload = await parseJsonResponse(response)
 
   if (!response.ok) {

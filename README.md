@@ -18,7 +18,7 @@ Enter your home airport, Friday/Monday class times, and weekend budget. The app:
 
 | Layer | Technology |
 |---|---|
-| Web Client | React + Vite, Tailwind CSS, Google Identity Services |
+| Web Client | React + Vite, Tailwind CSS, Google Identity Services + Capacitor native Google auth (iOS) |
 | API Services | Node.js + Express, Python + FastAPI (feasibility scoring) |
 | Database | Supabase (PostgreSQL) |
 | Scrapers | Python 3 (BeautifulSoup, requests) |
@@ -200,12 +200,22 @@ cp web_client/.env.example web_client/.env
 # SUPABASE_DB_URL=...
 # AERODATABOX_API_KEY=...
 # GOOGLE_CLIENT_ID=...
+# Optional for native app tokens:
+# GOOGLE_IOS_CLIENT_ID=...
 # AUTH_JWT_SECRET=...
 # Optional: PORT=3000, ADMIN_API_KEY=...
 
 # Edit web_client/.env and set:
 # VITE_API_BASE_URL=http://127.0.0.1:3000
+# VITE_API_BASE_URL_IOS=https://your-reachable-api-host
 # VITE_GOOGLE_CLIENT_ID=...
+# Optional iOS native Google auth settings:
+# VITE_GOOGLE_IOS_CLIENT_ID=...
+# VITE_GOOGLE_SERVER_CLIENT_ID=...
+
+# iOS-only (for native Google sign-in in Capacitor):
+# In Xcode -> App target -> Info -> URL Types, add the reversed iOS client ID
+# (format: com.googleusercontent.apps.<your-ios-client-id-without-.apps.googleusercontent.com>)
 
 npm --prefix api_services install
 npm --prefix web_client install

@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react"
 import { Capacitor } from "@capacitor/core"
 import { StatusBar, Style } from "@capacitor/status-bar"
+import { SocialLogin } from "@capgo/capacitor-social-login"
 import HomePage from "./components/HomePage"
 import NavBar from "./components/NavBar"
 import InputForm from "./components/InputForm"
@@ -41,6 +42,7 @@ const AUTH_STATUS = {
   CHECKING: "checking",
   SIGNED_OUT: "signed_out",
   SIGNED_IN: "signed_in",
+  GUEST: "guest",
 }
 
 function parseFriendCities(raw) {
@@ -163,11 +165,14 @@ function normalizeSavedInput(rawInput) {
 export default function App() {
   const initial = useMemo(() => parseFormFromSearch(window.location.search), [])
   const hasQueryBackedFormValues = useMemo(() => hasExplicitFormParams(window.location.search), [])
+  const initialStoredToken = useMemo(() => getStoredSessionToken(), [])
   const [view, setView] = useState(initial.view)
   const [form, setForm] = useState({ ...DEFAULT_FORM, ...initial.form })
 
-  const [authStatus, setAuthStatus] = useState(AUTH_STATUS.CHECKING)
-  const [sessionToken, setSessionToken] = useState("")
+  const [authStatus, setAuthStatus] = useState(
+    initialStoredToken ? AUTH_STATUS.CHECKING : AUTH_STATUS.SIGNED_OUT
+  )
+  const [sessionToken, setSessionToken] = useState(initialStoredToken)
   const [sessionUser, setSessionUser] = useState(null)
   const [authError, setAuthError] = useState("")
   const [isAuthBusy, setIsAuthBusy] = useState(false)
@@ -191,11 +196,8 @@ export default function App() {
 
   useEffect(() => {
     let cancelled = false
-    const token = getStoredSessionToken()
-    if (!token) {
-      setAuthStatus(AUTH_STATUS.SIGNED_OUT)
-      return
-    }
+    const token = initialStoredToken
+    if (!token) return
 
     const loadExistingSession = async () => {
       try {
@@ -217,7 +219,7 @@ export default function App() {
     return () => {
       cancelled = true
     }
-  }, [])
+  }, [initialStoredToken])
 
   useEffect(() => {
     const onPopState = () => {
@@ -277,7 +279,26 @@ export default function App() {
     }
   }
 
+  const handleContinueAsGuest = () => {
+    setIsAuthBusy(false)
+    setAuthError("")
+    setSessionToken("")
+    setSessionUser(null)
+    setAuthStatus(AUTH_STATUS.GUEST)
+  }
+
+  const handleStartSignIn = () => {
+    setAuthError("")
+    setAuthStatus(AUTH_STATUS.SIGNED_OUT)
+  }
+
   const handleSignOut = () => {
+    if (Capacitor.isNativePlatform() && Capacitor.getPlatform() === "ios") {
+      void SocialLogin.logout({ provider: "google" }).catch(() => {
+        // Best effort only; local session is still cleared below.
+      })
+    }
+
     clearStoredSessionToken()
     hasLoadedSavedInput.current = false
     setSessionToken("")
@@ -317,13 +338,14 @@ export default function App() {
     goHome()
   }
 
-  if (authStatus !== AUTH_STATUS.SIGNED_IN) {
+  if (authStatus === AUTH_STATUS.CHECKING || authStatus === AUTH_STATUS.SIGNED_OUT) {
     return (
       <div className="min-h-screen bg-transparent text-white">
         <BackgroundScene />
         <div className="relative z-10">
           <GoogleSignInPage
             onCredential={handleGoogleCredential}
+            onContinueAsGuest={handleContinueAsGuest}
             errorText={authError}
             isBusy={isAuthBusy || authStatus === AUTH_STATUS.CHECKING}
           />
@@ -336,18 +358,33 @@ export default function App() {
     <div className="min-h-screen bg-transparent text-white">
       <BackgroundScene />
       <div className="relative z-10">
-        <div className="fixed right-4 top-[calc(var(--safe-top)+4.75rem)] z-[120] flex items-center gap-3 rounded-full border border-[var(--border)] bg-[rgba(0,20,35,0.8)] px-3 py-2 backdrop-blur-sm">
-          <span className="max-w-[180px] truncate text-xs text-[var(--muted)] font-['Space_Mono',monospace]">
-            {sessionUser?.name || sessionUser?.email || "Signed in"}
-          </span>
-          <button
-            type="button"
-            onClick={handleSignOut}
-            className="text-xs font-semibold uppercase tracking-[0.2em] text-[var(--teal)]"
-          >
-            Sign out
-          </button>
-        </div>
+        {authStatus === AUTH_STATUS.SIGNED_IN ? (
+          <div className="fixed right-4 top-[calc(var(--safe-top)+4.75rem)] z-[120] flex items-center gap-3 rounded-full border border-[var(--border)] bg-[rgba(0,20,35,0.8)] px-3 py-2 backdrop-blur-sm">
+            <span className="max-w-[180px] truncate text-xs text-[var(--muted)] font-['Space_Mono',monospace]">
+              {sessionUser?.name || sessionUser?.email || "Signed in"}
+            </span>
+            <button
+              type="button"
+              onClick={handleSignOut}
+              className="text-xs font-semibold uppercase tracking-[0.2em] text-[var(--teal)]"
+            >
+              Sign out
+            </button>
+          </div>
+        ) : (
+          <div className="fixed right-4 top-[calc(var(--safe-top)+4.75rem)] z-[120] flex items-center gap-3 rounded-full border border-[var(--border)] bg-[rgba(0,20,35,0.8)] px-3 py-2 backdrop-blur-sm">
+            <span className="max-w-[160px] truncate text-xs text-[var(--muted)] font-['Space_Mono',monospace]">
+              Guest mode
+            </span>
+            <button
+              type="button"
+              onClick={handleStartSignIn}
+              className="text-xs font-semibold uppercase tracking-[0.2em] text-[var(--teal)]"
+            >
+              Sign in
+            </button>
+          </div>
+        )}
 
         {view === "home" ? (
           <HomePage onGetStarted={goToForm} />
@@ -361,7 +398,10 @@ export default function App() {
               logoHref="#top"
               showLinks={false}
             />
-            <div className="mx-auto w-full max-w-6xl px-6 py-28 sm:px-10">
+            <div
+              className="mx-auto w-full max-w-6xl px-6 pb-28 sm:px-10"
+              style={{ paddingTop: "calc(var(--safe-top) + 8.75rem)" }}
+            >
               <header className="mb-10">
                 <div className="section-label" style={{ textAlign: "left", marginBottom: "0.75rem" }}>
                   {view === "form" ? "Your Inputs" : "Ranked Results"}

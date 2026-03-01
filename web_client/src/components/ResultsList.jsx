@@ -202,10 +202,6 @@ export default function ResultsList({ formData }) {
             .filter((value) => Number.isFinite(value) && value > 0);
         const travelPrices = hackathons
             .map((h) => {
-                const flightCost = Number(h.estimated_flight_cost);
-                if (Number.isFinite(flightCost) && flightCost >= 0) {
-                    return flightCost;
-                }
                 const totalCost = Number(h.estimated_cost);
                 return Number.isFinite(totalCost) && totalCost >= 0
                     ? totalCost
@@ -227,14 +223,11 @@ export default function ResultsList({ formData }) {
             const prizeValue = Number(h.prize_pool);
             const hasPrizePool = Number.isFinite(prizeValue) && prizeValue > 0;
             const normalizedPrize = hasPrizePool ? prizeValue : 0;
-            const flightCostValue = Number(h.estimated_flight_cost);
             const totalCostValue = Number(h.estimated_cost);
             const travelPriceValue =
-                Number.isFinite(flightCostValue) && flightCostValue >= 0
-                    ? flightCostValue
-                    : Number.isFinite(totalCostValue) && totalCostValue >= 0
-                      ? totalCostValue
-                      : null;
+                Number.isFinite(totalCostValue) && totalCostValue >= 0
+                    ? totalCostValue
+                    : null;
 
             const prize_score = hasPrizePool
                 ? norm(normalizedPrize, prizeMin, prizeMax)

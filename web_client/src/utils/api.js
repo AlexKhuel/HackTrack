@@ -1,9 +1,31 @@
+import { Capacitor } from "@capacitor/core"
+
 const DEFAULT_BUDGET = 1_000_000
 const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL ?? "").toString().trim().replace(/\/+$/, "")
+const IOS_API_BASE_URL = (import.meta.env.VITE_API_BASE_URL_IOS ?? "")
+  .toString()
+  .trim()
+  .replace(/\/+$/, "")
 
 function buildApiUrl(path) {
-  if (!API_BASE_URL) return path
-  return `${API_BASE_URL}${path}`
+  const isNativeIos = Capacitor.isNativePlatform() && Capacitor.getPlatform() === "ios"
+  const baseUrl = isNativeIos && IOS_API_BASE_URL ? IOS_API_BASE_URL : API_BASE_URL
+  if (!baseUrl) return path
+  return `${baseUrl}${path}`
+}
+
+function isLocalhostUrl(url) {
+  return /\/\/(localhost|127\.0\.0\.1)(:\d+)?(\/|$)/i.test(url)
+}
+
+function buildFetchErrorMessage(url, originalMessage = "") {
+  const isNativeIos = Capacitor.isNativePlatform() && Capacitor.getPlatform() === "ios"
+  if (isNativeIos && isLocalhostUrl(url)) {
+    return `Could not reach API at ${url}. On iPhone, localhost/127.0.0.1 points to the phone itself. Set VITE_API_BASE_URL_IOS to a reachable API URL.`
+  }
+
+  const detail = (originalMessage ?? "").toString().trim()
+  return detail ? `Could not reach API at ${url}: ${detail}` : `Could not reach API at ${url}.`
 }
 
 function pad2(value) {
@@ -294,10 +316,16 @@ async function fetchFeasibleHackathons(formData, options = {}) {
     params.append("friend_cities", city)
   }
 
-  const response = await fetch(buildApiUrl(`/api/hackathons/feasible?${params.toString()}`), {
-    method: "GET",
-    signal: options.signal,
-  })
+  const url = buildApiUrl(`/api/hackathons/feasible?${params.toString()}`)
+  let response
+  try {
+    response = await fetch(url, {
+      method: "GET",
+      signal: options.signal,
+    })
+  } catch (err) {
+    throw new Error(buildFetchErrorMessage(url, err?.message))
+  }
 
   const raw = await response.text()
   let payload = {}
