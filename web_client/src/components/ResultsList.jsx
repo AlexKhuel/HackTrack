@@ -277,11 +277,12 @@ export default function ResultsList({ formData }) {
                     ? 1
                     : 0;
 
+                // ROI (40%) > Prize (30%) > Travel Time (20%) > Friend Bonus (10%)
                 const composite =
-                    0.35 * prize_score +
-                    0.25 * travel_price_score +
-                    0.25 * travel_time_score +
-                    0.15 * friend_bonus_score;
+                    0.3 * prize_score +
+                    0.4 * travel_price_score +
+                    0.2 * travel_time_score +
+                    0.1 * friend_bonus_score;
 
                 return {
                     ...h,

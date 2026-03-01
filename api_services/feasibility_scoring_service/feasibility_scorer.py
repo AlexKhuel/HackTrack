@@ -239,10 +239,15 @@ def scored(max_cost, max_time, origin_airports = None, friend_cities=None):
     # -------------------------
     # Final Weighted Score
     # -------------------------
+    # Weights: ROI > Prize > Travel Time > Friend Bonus
+    # ROI (40%): app's core differentiator — prize/cost efficiency
+    # Prize (30%): absolute value guards against low-prize ROI gaming
+    # Travel Time (20%): weekend time is scarce; long flights cut into hacking
+    # Friend Bonus (10%): meaningful but binary, shouldn't dominate ranking
     feasible_events["final_score"] = (
-        0.5 * feasible_events["prize_score"] +
-        0.3 * feasible_events["prize_to_total_cost_score"] +
-        0.1 * feasible_events["travel_time_score"] +
+        0.3 * feasible_events["prize_score"] +
+        0.4 * feasible_events["prize_to_total_cost_score"] +
+        0.2 * feasible_events["travel_time_score"] +
         0.1 * feasible_events["friend_bonus"]
     )
     print(feasible_events.sort_values("final_score", ascending=False)[["name", "city", "prize_pool", "prize_score", "total_cost", "total_time", "travel_time_score", "friend_bonus", "final_score"]].drop_duplicates(subset=["name", "city"]))
