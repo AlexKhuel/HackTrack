@@ -234,8 +234,65 @@ router.post('/', async (req, res) => {
 });
 
 router.get('/latest', async (req, res) => {
+  const client = await db.pool.connect();
   try {
-    const result = await db.query(
+    await client.query('BEGIN');
+
+    const appUserResult = await client.query(
+      `
+        SELECT id, name, profile_row_id
+        FROM app_users
+        WHERE id = $1
+        LIMIT 1
+        FOR UPDATE;
+      `,
+      [req.auth.user_id]
+    );
+
+    if (appUserResult.rowCount === 0) {
+      await client.query('ROLLBACK');
+      return res.status(401).json({ error: 'Authenticated user was not found.' });
+    }
+
+    const appUser = appUserResult.rows[0];
+    const linkedProfileRowId = Number(appUser.profile_row_id);
+    const hasLinkedProfile = Number.isFinite(linkedProfileRowId) && linkedProfileRowId > 0;
+
+    if (hasLinkedProfile) {
+      const profileResult = await client.query(
+        `
+          SELECT
+            id,
+            name,
+            country,
+            primary_airport_code,
+            secondary_airport_code,
+            tertiary_airport_code,
+            friend_cities,
+            timezone,
+            max_cost,
+            max_time,
+            friday_last_class,
+            monday_first_class
+          FROM public."user"
+          WHERE id = $1
+          LIMIT 1;
+        `,
+        [linkedProfileRowId]
+      );
+
+      await client.query('COMMIT');
+      if (profileResult.rowCount === 0) return res.json({ input: null });
+      return res.json({ input: profileResult.rows[0] });
+    }
+
+    const appUserName = cleanString(appUser.name);
+    if (!appUserName) {
+      await client.query('COMMIT');
+      return res.json({ input: null });
+    }
+
+    const legacyCandidateResult = await client.query(
       `
         SELECT
           input.id,
@@ -250,27 +307,46 @@ router.get('/latest', async (req, res) => {
           input.max_time,
           input.friday_last_class,
           input.monday_first_class
-        FROM app_users au
-        LEFT JOIN public."user" input
-          ON input.id = au.profile_row_id
-        WHERE au.id = $1
-        LIMIT 1;
+        FROM public."user" input
+        WHERE lower(btrim(coalesce(input.name, ''))) = lower(btrim($1))
+          AND NOT EXISTS (
+            SELECT 1
+            FROM app_users mapped
+            WHERE mapped.profile_row_id = input.id
+          )
+        ORDER BY input.id DESC
+        LIMIT 2;
       `,
-      [req.auth.user_id]
+      [appUserName]
     );
 
-    if (result.rowCount === 0) {
-      return res.status(401).json({ error: 'Authenticated user was not found.' });
-    }
-
-    if (!result.rows[0].id) {
+    if (legacyCandidateResult.rowCount !== 1) {
+      await client.query('COMMIT');
       return res.json({ input: null });
     }
 
-    return res.json({ input: result.rows[0] });
+    const legacyProfile = legacyCandidateResult.rows[0];
+    await client.query(
+      `
+        UPDATE app_users
+        SET profile_row_id = $1, updated_at = NOW()
+        WHERE id = $2;
+      `,
+      [legacyProfile.id, req.auth.user_id]
+    );
+
+    await client.query('COMMIT');
+    return res.json({ input: legacyProfile });
   } catch (err) {
+    try {
+      await client.query('ROLLBACK');
+    } catch {
+      // Ignore rollback failures; original error is more useful.
+    }
     console.error('[user-inputs] Failed to fetch user input:', err);
     return res.status(500).json({ error: 'Failed to fetch user input.' });
+  } finally {
+    client.release();
   }
 });
 
